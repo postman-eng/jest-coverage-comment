@@ -44,16 +44,8 @@ export async function createComment(
       core.warning(warningsArr.join('\n'))
     }
 
-    if (eventName === 'push') {
-      core.info('Create commit comment')
-
-      await octokit.rest.repos.createCommitComment({
-        repo,
-        owner,
-        commit_sha: options.commit,
-        body,
-      })
-    } else if (
+    if (
+      eventName === 'push' ||
       eventName === 'pull_request' ||
       eventName === 'pull_request_target'
     ) {
