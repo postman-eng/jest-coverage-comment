@@ -97,13 +97,10 @@ async function main(): Promise<void> {
       multipleJunitFiles,
     }
 
-    if (eventName === 'pull_request' && payload) {
+    if ((eventName === 'pull_request' || eventName === 'push') && payload) {
       options.commit = payload.pull_request?.head.sha
       options.head = payload.pull_request?.head.ref
       options.base = payload.pull_request?.base.ref
-    } else if (eventName === 'push') {
-      options.commit = payload.after
-      options.head = context.ref
     }
 
     if (options.reportOnlyChangedFiles) {
