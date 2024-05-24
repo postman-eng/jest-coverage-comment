@@ -15,6 +15,9 @@ export async function createComment(
     const octokit = getOctokit(options.token)
     const issue_number = payload.pull_request ? payload.pull_request.number : 0
 
+    console.log('Options', options)
+    console.log('Issue Number', issue_number)
+
     if (body.length > MAX_COMMENT_LENGTH) {
       const warningsArr = [
         `Your comment is too long (maximum is ${MAX_COMMENT_LENGTH} characters), coverage report will not be added.`,
@@ -42,6 +45,17 @@ export async function createComment(
       }
 
       core.warning(warningsArr.join('\n'))
+    }
+
+    if (eventName === 'push') {
+      core.info('Create commit comment')
+
+      await octokit.rest.repos.createCommitComment({
+        repo,
+        owner,
+        commit_sha: options.commit,
+        body,
+      })
     }
 
     if (

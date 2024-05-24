@@ -381,6 +381,8 @@ async function createComment(options, body) {
         const { repo, owner } = github_1.context.repo;
         const octokit = (0, github_1.getOctokit)(options.token);
         const issue_number = payload.pull_request ? payload.pull_request.number : 0;
+        console.log('Options', options);
+        console.log('Issue Number', issue_number);
         if (body.length > MAX_COMMENT_LENGTH) {
             const warningsArr = [
                 `Your comment is too long (maximum is ${MAX_COMMENT_LENGTH} characters), coverage report will not be added.`,
@@ -398,6 +400,15 @@ async function createComment(options, body) {
                 warningsArr.push('- Add "remove-links-to-lines: true" - to remove links to lines');
             }
             core.warning(warningsArr.join('\n'));
+        }
+        if (eventName === 'push') {
+            core.info('Create commit comment');
+            await octokit.rest.repos.createCommitComment({
+                repo,
+                owner,
+                commit_sha: options.commit,
+                body,
+            });
         }
         if (eventName === 'push' ||
             eventName === 'pull_request' ||
@@ -572,11 +583,17 @@ async function main() {
             multipleFiles,
             multipleJunitFiles,
         };
-        if ((eventName === 'pull_request' || eventName === 'push') && payload) {
+        console.log('payload', JSON.stringify(payload, null, 2));
+        if (eventName === 'pull_request' && payload) {
             options.commit = payload.pull_request?.head.sha;
             options.head = payload.pull_request?.head.ref;
             options.base = payload.pull_request?.base.ref;
         }
+        else if (eventName === 'push') {
+            options.commit = payload.after;
+            options.head = github_1.context.ref;
+        }
+        console.log('Options', options);
         if (options.reportOnlyChangedFiles) {
             const changedFiles = await (0, changed_files_1.getChangedFiles)(options);
             options.changedFiles = changedFiles;
