@@ -222,7 +222,9 @@ function getCoverage(coverageArr) {
 }
 /** Make html table from coverage.txt. */
 function toTable(coverageArr, options) {
-    core.info(`CoverageArr ${coverageArr}`);
+    for (const obj of coverageArr) {
+        core.info(`CoverageArr ${JSON.stringify(obj)}`);
+    }
     const headTr = toHeadRow();
     const totalRow = (0, parse_coverage_1.getTotalLine)(coverageArr);
     const totalTr = toTotalRow(totalRow);
