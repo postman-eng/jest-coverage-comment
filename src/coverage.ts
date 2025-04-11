@@ -69,6 +69,7 @@ function toTable(coverageArr: CoverageLine[], options: Options): string {
   const rows = [totalTr]
 
   core.info(`Changed files ${JSON.stringify(changedFiles)}`)
+  core.info(`Folders ${JSON.stringify(folders)}`)
 
   for (const key of Object.keys(folders)) {
     const files = folders[key]
@@ -77,7 +78,9 @@ function toTable(coverageArr: CoverageLine[], options: Options): string {
           return true
         }
 
-        return changedFiles?.all.some((c) => c.includes(line.file))
+        return changedFiles?.all.some(
+          (c) => c.includes(line.file) || line.file.includes(c)
+        )
       })
       // Filter folders without files
       .filter((_line, _i, arr) => {
