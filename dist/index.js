@@ -232,13 +232,14 @@ function toTable(coverageArr, options) {
     const { reportOnlyChangedFiles, changedFiles } = options;
     const rows = [totalTr];
     core.info(`Changed files ${JSON.stringify(changedFiles)}`);
+    core.info(`Folders ${JSON.stringify(folders)}`);
     for (const key of Object.keys(folders)) {
         const files = folders[key]
             .filter((line) => {
             if (!reportOnlyChangedFiles) {
                 return true;
             }
-            return changedFiles?.all.some((c) => c.includes(line.file));
+            return changedFiles?.all.some((c) => c.includes(line.file) || line.file.includes(c));
         })
             // Filter folders without files
             .filter((_line, _i, arr) => {
