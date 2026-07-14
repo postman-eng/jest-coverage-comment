@@ -44,20 +44,38 @@ export async function getChangedFiles(
     core.info(`Base commit: ${base}`)
     core.info(`Head commit: ${head}`)
 
-    // Get the changed files. Paginate the compare endpoint so large PRs
-    // (>300 files) don't silently lose changed-line data and let the gate
-    // pass on partially-analyzed diffs.
-    const files =
-      base === '0000000000000000000000000000000000000000'
-        ? // For the first commit in a repository we cannot get a diff.
-          (await octokit.rest.repos.getCommit({ owner, repo, ref: head })).data
-            .files
-        : // https://developer.github.com/v3/repos/commits/#compare-two-commits
-          await octokit.paginate(
-            octokit.rest.repos.compareCommits,
-            { base, head, owner, repo, per_page: 100 },
-            (response) => response.data.files ?? []
-          )
+    // Resolve the set of changed files (with per-file patch) for this event.
+    //
+    // pull_request: use the PR's own file list. octokit.paginate walks every page,
+    //   so there is no 300-file cap, and it returns the same three-dot diff GitHub
+    //   shows under "Files changed". (The compare endpoint only paginates its
+    //   `commits` array, not `files`, so paginating it never returned >300 files
+    //   and could duplicate the truncated list across pages.)
+    // push: diff the pushed range before...after via the compare endpoint. Compare
+    //   caps `files` at 300, but push diffs are typically small.
+    // new branch / first commit (all-zero base): no range to diff, fall back to the
+    //   tip commit.
+    const EMPTY_SHA = '0000000000000000000000000000000000000000'
+    const prNumber = payload.pull_request?.number
+
+    let files: { filename: string; status?: string; patch?: string }[] = []
+
+    if (eventName === 'pull_request' && prNumber) {
+      files = await octokit.paginate(octokit.rest.pulls.listFiles, {
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: 100,
+      })
+    } else if (base === EMPTY_SHA) {
+      files =
+        (await octokit.rest.repos.getCommit({ owner, repo, ref: head })).data
+          .files ?? []
+    } else {
+      files =
+        (await octokit.rest.repos.compareCommits({ base, head, owner, repo }))
+          .data.files ?? []
+    }
 
     if (files?.length) {
       for (const file of files) {
