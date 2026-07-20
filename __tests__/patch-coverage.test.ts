@@ -113,6 +113,32 @@ describe('getPatchCoverage', () => {
     expect(patch?.files).toHaveLength(0)
   })
 
+  test('ignores changed tooling/config files with no coverage data', () => {
+    const options = baseOptions({
+      changedFiles: {
+        all: [
+          'jest.config.js',
+          'webpack.config.ts',
+          'packages/app/vite.config.mjs',
+          '.eslintrc.js',
+        ],
+        changedLines: {
+          'jest.config.js': [1, 2, 3],
+          'webpack.config.ts': [10],
+          'packages/app/vite.config.mjs': [5, 6],
+          '.eslintrc.js': [1],
+        },
+      },
+    })
+
+    const patch = getPatchCoverage(options)
+    // Config files are excluded from instrumentation by design => nothing
+    // coverable changed => 100% (gate passes), no files listed.
+    expect(patch?.totalLines).toBe(0)
+    expect(patch?.coverage).toBe(100)
+    expect(patch?.files).toHaveLength(0)
+  })
+
   test('resolves pass/fail against the configured threshold', () => {
     const failing = getPatchCoverage(
       baseOptions({
