@@ -152,6 +152,15 @@ const DEFAULT_SOURCE_EXTENSIONS = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx']
 // Files that are source-like by extension but should never count as coverable.
 const NON_COVERABLE = /(\.test\.|\.spec\.|\.d\.ts$|__tests__\/|__mocks__\/)/
 
+// Build/tooling config that is source-like by extension but is deliberately
+// excluded from instrumentation (not part of `collectCoverageFrom`), so it is
+// absent from the coverage report by design. Matches `*.config.{js,cjs,mjs,ts}`
+// (jest.config.js, webpack.config.ts, vite.config.mjs, …) and dotfile RC
+// configs (.eslintrc.js, .prettierrc.cjs, …). Without this, editing such a file
+// in a PR would be scored as an untested source file and wrongly force patch
+// coverage to 0%.
+const CONFIG_FILE = /(^|\/)([^/]+\.config\.[cm]?[jt]s|\.[^/]+rc\.[cm]?[jt]s)$/
+
 /**
  * Decide whether a changed file without coverage data should still be counted
  * (as fully uncovered). This closes the gap where a brand-new, untested source
@@ -162,7 +171,7 @@ function isCoverableSource(file: string): boolean {
   if (!DEFAULT_SOURCE_EXTENSIONS.some((ext) => file.endsWith(ext))) {
     return false
   }
-  return !NON_COVERABLE.test(file)
+  return !NON_COVERABLE.test(file) && !CONFIG_FILE.test(file)
 }
 
 /** Parse the configured threshold; returns null when unset/invalid (advisory). */
