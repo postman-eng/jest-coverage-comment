@@ -248,12 +248,9 @@ const DEFAULT_COVERAGE = {
 };
 /** Convert coverage to md. */
 function coverageToMarkdown(coverageArr, options) {
-    const { reportOnlyChangedFiles, coverageTitle } = options;
-    const { coverage } = getCoverage(coverageArr);
+    const { coverageTitle } = options;
     const table = toTable(coverageArr, options);
-    const onlyChanged = reportOnlyChangedFiles ? '• ' : '';
-    const reportHtml = `<details><summary>${coverageTitle} ${onlyChanged}(<b>${coverage}%</b>)</summary>${table}</details>`;
-    return reportHtml;
+    return `<details><summary>${coverageTitle}</summary>${table}</details>`;
 }
 /** Get coverage and color from CoverageLine[]. */
 function getCoverage(coverageArr) {
@@ -727,6 +724,34 @@ async function main() {
                 }
             }
         }
+        // --- Per-file breakdown (from the Jest text report) ---
+        // Computed before the net section so it can be nested inside the same
+        // "Overall coverage" dropdown rather than sitting as a sibling section.
+        let coverageMd = '';
+        if (options.coverageFile) {
+            const coverageReport = (0, coverage_1.getCoverageReport)(options);
+            const { coverageHtml, coverage: reportCoverage, color: coverageColor, branches, functions, lines, statements, } = coverageReport;
+            if (lines || coverageHtml) {
+                core.startGroup(options.coverageTitle || 'Coverage');
+                core.info(`coverage: ${reportCoverage}`);
+                core.info(`color: ${coverageColor}`);
+                core.info(`branches: ${branches}`);
+                core.info(`functions: ${functions}`);
+                core.info(`lines: ${lines}`);
+                core.info(`statements: ${statements}`);
+                core.info(`coverageHtml: ${coverageHtml}`);
+                core.setOutput('coverage', reportCoverage);
+                core.setOutput('color', coverageColor);
+                core.setOutput('branches', branches);
+                core.setOutput('functions', functions);
+                core.setOutput('lines', lines);
+                core.setOutput('statements', statements);
+                core.setOutput('coverageHtml', coverageHtml);
+                core.endGroup();
+            }
+            // getCoverageReport already wraps its output in a <details> block.
+            coverageMd = coverageHtml || '';
+        }
         // --- Net (whole-repo) coverage: badge + diff against base + summary table ---
         const netLines = [];
         {
@@ -749,6 +774,7 @@ async function main() {
         const netBody = [
             netLines.join('\n'),
             options.hideSummary ? '' : summaryHtml,
+            coverageMd,
         ]
             .filter(Boolean)
             .join('\n\n');
@@ -777,32 +803,6 @@ async function main() {
                 junitMd = wrapInDetails(`🧪 Test results${hasFailures ? ' · ❌ failures' : ''}`, junitHtml);
             }
         }
-        // --- Per-file breakdown (from the Jest text report) ---
-        let coverageMd = '';
-        if (options.coverageFile) {
-            const coverageReport = (0, coverage_1.getCoverageReport)(options);
-            const { coverageHtml, coverage: reportCoverage, color: coverageColor, branches, functions, lines, statements, } = coverageReport;
-            if (lines || coverageHtml) {
-                core.startGroup(options.coverageTitle || 'Coverage');
-                core.info(`coverage: ${reportCoverage}`);
-                core.info(`color: ${coverageColor}`);
-                core.info(`branches: ${branches}`);
-                core.info(`functions: ${functions}`);
-                core.info(`lines: ${lines}`);
-                core.info(`statements: ${statements}`);
-                core.info(`coverageHtml: ${coverageHtml}`);
-                core.setOutput('coverage', reportCoverage);
-                core.setOutput('color', coverageColor);
-                core.setOutput('branches', branches);
-                core.setOutput('functions', functions);
-                core.setOutput('lines', lines);
-                core.setOutput('statements', statements);
-                core.setOutput('coverageHtml', coverageHtml);
-                core.endGroup();
-            }
-            // getCoverageReport already wraps its output in a <details> block.
-            coverageMd = coverageHtml || '';
-        }
         let multiMd = '';
         if (multipleFiles?.length) {
             multiMd = (0, multi_files_1.getMultipleReport)(options) || '';
@@ -812,16 +812,9 @@ async function main() {
             multiJunitMd = (await (0, multi_junit_files_1.getMultipleJunitReport)(options)) || '';
         }
         // Assemble: title, blocking incremental coverage, then collapsed sections
-        // ordered by criticality (test failures > net coverage > file breakdown).
-        finalHtml = [
-            titleMd,
-            incrementalMd,
-            junitMd,
-            netMd,
-            coverageMd,
-            multiMd,
-            multiJunitMd,
-        ]
+        // ordered by criticality (test failures > overall coverage). The per-file
+        // breakdown is nested inside the overall-coverage dropdown, not a sibling.
+        finalHtml = [titleMd, incrementalMd, junitMd, netMd, multiMd, multiJunitMd]
             .filter(Boolean)
             .join('\n\n');
         if (!finalHtml || options.hideComment) {
@@ -1355,6 +1348,14 @@ const NON_COVERABLE = /(\.test\.|\.spec\.|\.d\.ts$|__tests__\/|__mocks__\/)/;
 // in a PR would be scored as an untested source file and wrongly force patch
 // coverage to 0%.
 const CONFIG_FILE = /(^|\/)([^/]+\.config\.[cm]?[jt]s|\.[^/]+rc\.[cm]?[jt]s)$/;
+// Test-runner / CI harness wrapper scripts (e.g. `scripts/test-unit.js`,
+// `npm/test-integration.js`, `packages/x/npm/test/test-unit.js`). These invoke
+// the test runner / wire up coverage reporters but are not themselves
+// instrumented app source, so they are absent from the coverage report by
+// design. Matches any file whose basename starts with `test-`. Without this,
+// adding such a wrapper in a PR would be scored as an untested source file and
+// wrongly force patch coverage to 0%.
+const TEST_RUNNER = /(^|\/)test-[^/]*\.[cm]?[jt]sx?$/;
 /**
  * Decide whether a changed file without coverage data should still be counted
  * (as fully uncovered). This closes the gap where a brand-new, untested source
@@ -1365,7 +1366,9 @@ function isCoverableSource(file) {
     if (!DEFAULT_SOURCE_EXTENSIONS.some((ext) => file.endsWith(ext))) {
         return false;
     }
-    return !NON_COVERABLE.test(file) && !CONFIG_FILE.test(file);
+    return (!NON_COVERABLE.test(file) &&
+        !CONFIG_FILE.test(file) &&
+        !TEST_RUNNER.test(file));
 }
 /** Parse the configured threshold; returns null when unset/invalid (advisory). */
 function parseThreshold(raw) {
@@ -1490,7 +1493,7 @@ function patchCoverageToMarkdown(patch, options) {
     }
     else {
         heading = `### Incremental line coverage: ${pct}`;
-        lead = `${ratio} _(advisory \u2014 not blocking)_.`;
+        lead = `${ratio}.`;
     }
     const sections = [heading, lead];
     if (patch.files.length) {

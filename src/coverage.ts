@@ -17,14 +17,11 @@ function coverageToMarkdown(
   coverageArr: CoverageLine[],
   options: Options
 ): string {
-  const { reportOnlyChangedFiles, coverageTitle } = options
-  const { coverage } = getCoverage(coverageArr)
+  const { coverageTitle } = options
 
   const table = toTable(coverageArr, options)
-  const onlyChanged = reportOnlyChangedFiles ? '• ' : ''
-  const reportHtml = `<details><summary>${coverageTitle} ${onlyChanged}(<b>${coverage}%</b>)</summary>${table}</details>`
 
-  return reportHtml
+  return `<details><summary>${coverageTitle}</summary>${table}</details>`
 }
 
 /** Get coverage and color from CoverageLine[]. */
