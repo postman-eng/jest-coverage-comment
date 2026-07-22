@@ -219,72 +219,9 @@ async function main(): Promise<void> {
       }
     }
 
-    // --- Net (whole-repo) coverage: badge + diff against base + summary table ---
-    const netLines: string[] = []
-    {
-      const altText = `Net Coverage: ${coverage}`
-      const badgeUrl = `https://img.shields.io/badge/${badgeTitle
-        .split(' ')
-        .join('_')}-${coverage}%25-${color}.svg`
-      netLines.push(`- ![${altText}](${badgeUrl})`)
-    }
-
-    if (options.netCoverageMain) {
-      const netCoverageMainBranch = parseInt(
-        options.netCoverageMain ? options.netCoverageMain : '0'
-      )
-      const coverageChange = coverage - netCoverageMainBranch
-      const coverageChangeText = `${
-        coverageChange === 0 ? '■' : coverageChange > 0 ? '▲' : '▼'
-      }_${Math.abs(coverageChange)}`
-      const coverageChangeColor =
-        coverageChange === 0 ? 'grey' : coverageChange > 0 ? 'green' : 'red'
-      const altText = `Coverage change: ${coverageChange}`
-      const badgeUrl = `https://img.shields.io/badge/${coverageChangeText}%25-${coverageChangeColor}.svg`
-      const baseLabel = options.base ? `\`${options.base}\`` : 'base branch'
-      netLines.push(`- Diff against ${baseLabel}: ![${altText}](${badgeUrl})`)
-    }
-
-    const netBody = [
-      netLines.join('\n'),
-      options.hideSummary ? '' : summaryHtml,
-    ]
-      .filter(Boolean)
-      .join('\n\n')
-    const netMd = netBody ? wrapInDetails('📊 Overall coverage', netBody) : ''
-
-    // --- Test results (junit) ---
-    let junitMd = ''
-    if (options.junitFile) {
-      const junit = await getJunitReport(options)
-      const { junitHtml, tests, skipped, failures, errors, time } = junit
-
-      if (junitHtml) {
-        core.startGroup(options.junitTitle || 'Junit')
-        core.info(`tests: ${tests}`)
-        core.info(`skipped: ${skipped}`)
-        core.info(`failures: ${failures}`)
-        core.info(`errors: ${errors}`)
-        core.info(`time: ${time}`)
-        core.info(`junitHtml: ${junitHtml}`)
-
-        core.setOutput('tests', tests)
-        core.setOutput('skipped', skipped)
-        core.setOutput('failures', failures)
-        core.setOutput('errors', errors)
-        core.setOutput('time', time)
-        core.setOutput('junitHtml', junitHtml)
-        core.endGroup()
-
-        const hasFailures = Number(failures) > 0 || Number(errors) > 0
-        junitMd = wrapInDetails(
-          `🧪 Test results${hasFailures ? ' · ❌ failures' : ''}`,
-          junitHtml
-        )
-      }
-    }
-
     // --- Per-file breakdown (from the Jest text report) ---
+    // Computed before the net section so it can be nested inside the same
+    // "Overall coverage" dropdown rather than sitting as a sibling section.
     let coverageMd = ''
     if (options.coverageFile) {
       const coverageReport = getCoverageReport(options)
@@ -322,6 +259,72 @@ async function main(): Promise<void> {
       coverageMd = coverageHtml || ''
     }
 
+    // --- Net (whole-repo) coverage: badge + diff against base + summary table ---
+    const netLines: string[] = []
+    {
+      const altText = `Net Coverage: ${coverage}`
+      const badgeUrl = `https://img.shields.io/badge/${badgeTitle
+        .split(' ')
+        .join('_')}-${coverage}%25-${color}.svg`
+      netLines.push(`- ![${altText}](${badgeUrl})`)
+    }
+
+    if (options.netCoverageMain) {
+      const netCoverageMainBranch = parseInt(
+        options.netCoverageMain ? options.netCoverageMain : '0'
+      )
+      const coverageChange = coverage - netCoverageMainBranch
+      const coverageChangeText = `${
+        coverageChange === 0 ? '■' : coverageChange > 0 ? '▲' : '▼'
+      }_${Math.abs(coverageChange)}`
+      const coverageChangeColor =
+        coverageChange === 0 ? 'grey' : coverageChange > 0 ? 'green' : 'red'
+      const altText = `Coverage change: ${coverageChange}`
+      const badgeUrl = `https://img.shields.io/badge/${coverageChangeText}%25-${coverageChangeColor}.svg`
+      const baseLabel = options.base ? `\`${options.base}\`` : 'base branch'
+      netLines.push(`- Diff against ${baseLabel}: ![${altText}](${badgeUrl})`)
+    }
+
+    const netBody = [
+      netLines.join('\n'),
+      options.hideSummary ? '' : summaryHtml,
+      coverageMd,
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+    const netMd = netBody ? wrapInDetails('📊 Overall coverage', netBody) : ''
+
+    // --- Test results (junit) ---
+    let junitMd = ''
+    if (options.junitFile) {
+      const junit = await getJunitReport(options)
+      const { junitHtml, tests, skipped, failures, errors, time } = junit
+
+      if (junitHtml) {
+        core.startGroup(options.junitTitle || 'Junit')
+        core.info(`tests: ${tests}`)
+        core.info(`skipped: ${skipped}`)
+        core.info(`failures: ${failures}`)
+        core.info(`errors: ${errors}`)
+        core.info(`time: ${time}`)
+        core.info(`junitHtml: ${junitHtml}`)
+
+        core.setOutput('tests', tests)
+        core.setOutput('skipped', skipped)
+        core.setOutput('failures', failures)
+        core.setOutput('errors', errors)
+        core.setOutput('time', time)
+        core.setOutput('junitHtml', junitHtml)
+        core.endGroup()
+
+        const hasFailures = Number(failures) > 0 || Number(errors) > 0
+        junitMd = wrapInDetails(
+          `🧪 Test results${hasFailures ? ' · ❌ failures' : ''}`,
+          junitHtml
+        )
+      }
+    }
+
     let multiMd = ''
     if (multipleFiles?.length) {
       multiMd = getMultipleReport(options) || ''
@@ -333,16 +336,9 @@ async function main(): Promise<void> {
     }
 
     // Assemble: title, blocking incremental coverage, then collapsed sections
-    // ordered by criticality (test failures > net coverage > file breakdown).
-    finalHtml = [
-      titleMd,
-      incrementalMd,
-      junitMd,
-      netMd,
-      coverageMd,
-      multiMd,
-      multiJunitMd,
-    ]
+    // ordered by criticality (test failures > overall coverage). The per-file
+    // breakdown is nested inside the overall-coverage dropdown, not a sibling.
+    finalHtml = [titleMd, incrementalMd, junitMd, netMd, multiMd, multiJunitMd]
       .filter(Boolean)
       .join('\n\n')
 

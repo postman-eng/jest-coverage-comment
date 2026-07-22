@@ -139,6 +139,48 @@ describe('getPatchCoverage', () => {
     expect(patch?.files).toHaveLength(0)
   })
 
+  test('ignores changed test-runner / CI wrapper scripts with no coverage data', () => {
+    const options = baseOptions({
+      changedFiles: {
+        all: [
+          'scripts/test-unit.js',
+          'scripts/test-integration.js',
+          'npm/test-integration.js',
+          'packages/common/npm/test/test-unit.js',
+        ],
+        changedLines: {
+          'scripts/test-unit.js': [1, 2, 3],
+          'scripts/test-integration.js': [1],
+          'npm/test-integration.js': [4, 5],
+          'packages/common/npm/test/test-unit.js': [1, 2],
+        },
+      },
+    })
+
+    const patch = getPatchCoverage(options)
+    // Runner/harness wrappers are not instrumented source => nothing coverable
+    // changed => 100% (gate passes), no files listed.
+    expect(patch?.totalLines).toBe(0)
+    expect(patch?.coverage).toBe(100)
+    expect(patch?.files).toHaveLength(0)
+  })
+
+  test('still counts a genuine new source file whose name merely contains "test"', () => {
+    const options = baseOptions({
+      changedFiles: {
+        all: ['src/attestation.ts'],
+        changedLines: { 'src/attestation.ts': [1, 2, 3] },
+      },
+    })
+
+    const patch = getPatchCoverage(options)
+    // `attestation.ts` is real source (basename does not start with `test-`),
+    // so it must still be gated as fully uncovered.
+    expect(patch?.coverage).toBe(0)
+    expect(patch?.totalLines).toBe(3)
+    expect(patch?.files[0].instrumented).toBe(false)
+  })
+
   test('resolves pass/fail against the configured threshold', () => {
     const failing = getPatchCoverage(
       baseOptions({

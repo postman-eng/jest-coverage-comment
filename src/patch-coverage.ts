@@ -161,6 +161,15 @@ const NON_COVERABLE = /(\.test\.|\.spec\.|\.d\.ts$|__tests__\/|__mocks__\/)/
 // coverage to 0%.
 const CONFIG_FILE = /(^|\/)([^/]+\.config\.[cm]?[jt]s|\.[^/]+rc\.[cm]?[jt]s)$/
 
+// Test-runner / CI harness wrapper scripts (e.g. `scripts/test-unit.js`,
+// `npm/test-integration.js`, `packages/x/npm/test/test-unit.js`). These invoke
+// the test runner / wire up coverage reporters but are not themselves
+// instrumented app source, so they are absent from the coverage report by
+// design. Matches any file whose basename starts with `test-`. Without this,
+// adding such a wrapper in a PR would be scored as an untested source file and
+// wrongly force patch coverage to 0%.
+const TEST_RUNNER = /(^|\/)test-[^/]*\.[cm]?[jt]sx?$/
+
 /**
  * Decide whether a changed file without coverage data should still be counted
  * (as fully uncovered). This closes the gap where a brand-new, untested source
@@ -171,7 +180,11 @@ function isCoverableSource(file: string): boolean {
   if (!DEFAULT_SOURCE_EXTENSIONS.some((ext) => file.endsWith(ext))) {
     return false
   }
-  return !NON_COVERABLE.test(file) && !CONFIG_FILE.test(file)
+  return (
+    !NON_COVERABLE.test(file) &&
+    !CONFIG_FILE.test(file) &&
+    !TEST_RUNNER.test(file)
+  )
 }
 
 /** Parse the configured threshold; returns null when unset/invalid (advisory). */
@@ -318,7 +331,7 @@ export function patchCoverageToMarkdown(
     lead = `${ratio}.`
   } else {
     heading = `### Incremental line coverage: ${pct}`
-    lead = `${ratio} _(advisory \u2014 not blocking)_.`
+    lead = `${ratio}.`
   }
 
   const sections = [heading, lead]
