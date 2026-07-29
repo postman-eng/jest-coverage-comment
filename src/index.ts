@@ -9,7 +9,6 @@ import { getChangedFiles } from './changed-files'
 import { getMultipleReport } from './multi-files'
 import { getMultipleJunitReport } from './multi-junit-files'
 import { getPatchCoverage, patchCoverageToMarkdown } from './patch-coverage'
-import { inferCoverageExclude } from './utils'
 
 /**
  * Wrap non-blocking report content in a collapsed <details> block. The blank
@@ -86,22 +85,12 @@ async function main(): Promise<void> {
       required: false,
     })
 
-    // Prefer an explicit input; otherwise auto-infer from the repo's declarative
-    // NYC config so services need not pass this manually. Built-in defaults are
-    // always applied on top of whichever source is used.
-    let coverageExclude = core.getMultilineInput('coverage-exclude', {
+    // Extra exclude globs on top of the always-applied built-in defaults.
+    // Org/service-specific paths are supplied by the caller (see the
+    // coverage-pr-comment-action default), not hardcoded in this generic action.
+    const coverageExclude = core.getMultilineInput('coverage-exclude', {
       required: false,
     })
-    if (!coverageExclude.length) {
-      coverageExclude = inferCoverageExclude()
-      if (coverageExclude.length) {
-        core.info(
-          `Auto-inferred coverage excludes from repo config: ${coverageExclude.join(
-            ', '
-          )}`
-        )
-      }
-    }
 
     const serverUrl = context.serverUrl || 'https://github.com'
     core.info(`Uses Github URL: ${serverUrl}`)

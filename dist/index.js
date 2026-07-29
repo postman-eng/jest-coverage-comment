@@ -550,7 +550,6 @@ const changed_files_1 = __nccwpck_require__(6503);
 const multi_files_1 = __nccwpck_require__(8796);
 const multi_junit_files_1 = __nccwpck_require__(441);
 const patch_coverage_1 = __nccwpck_require__(648);
-const utils_1 = __nccwpck_require__(918);
 /**
  * Wrap non-blocking report content in a collapsed <details> block. The blank
  * lines are required for GitHub to render markdown (tables) inside the HTML.
@@ -613,18 +612,12 @@ async function main() {
         const patchThreshold = core.getInput('patch-coverage-threshold', {
             required: false,
         });
-        // Prefer an explicit input; otherwise auto-infer from the repo's declarative
-        // NYC config so services need not pass this manually. Built-in defaults are
-        // always applied on top of whichever source is used.
-        let coverageExclude = core.getMultilineInput('coverage-exclude', {
+        // Extra exclude globs on top of the always-applied built-in defaults.
+        // Org/service-specific paths are supplied by the caller (see the
+        // coverage-pr-comment-action default), not hardcoded in this generic action.
+        const coverageExclude = core.getMultilineInput('coverage-exclude', {
             required: false,
         });
-        if (!coverageExclude.length) {
-            coverageExclude = (0, utils_1.inferCoverageExclude)();
-            if (coverageExclude.length) {
-                core.info(`Auto-inferred coverage excludes from repo config: ${coverageExclude.join(', ')}`);
-            }
-        }
         const serverUrl = github_1.context.serverUrl || 'https://github.com';
         core.info(`Uses Github URL: ${serverUrl}`);
         const { repo, owner } = github_1.context.repo;
@@ -1352,11 +1345,13 @@ function loadLineHits(options) {
     return null;
 }
 const DEFAULT_SOURCE_EXTENSIONS = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx'];
-// Source-like files that are excluded from instrumentation across ecosystems:
-// test/spec files, type declarations, test/mock dirs, build/tooling config, and
-// test-runner wrapper scripts. Absent from the coverage report by design, so a
-// change to them must not be scored as uncovered source.
-const GENERIC_EXCLUDE = [
+// Universal, always-applied excludes: source-like files that no test runner
+// instruments in any ecosystem -- test/spec files, type declarations, test/mock
+// dirs, build/tooling config, and test-runner wrapper scripts. They are absent
+// from the coverage report by design, so a change to them must never be scored
+// as uncovered source. This is a non-negotiable safety net (not project
+// policy); org- or service-specific paths are supplied via `coverage-exclude`.
+exports.DEFAULT_COVERAGE_EXCLUDE = [
     '**/*.test.*',
     '**/*.spec.*',
     '**/*.d.ts',
@@ -1382,19 +1377,6 @@ const GENERIC_EXCLUDE = [
     '**/test-*.mts',
     '**/test-*.jsx',
     '**/test-*.tsx',
-];
-// Postman service-layout paths (Photon / Sails) excluded from unit
-// instrumentation by the standard `@postman/generator-stack` NYC config
-// (`exclude: ['api/controllers', 'config', 'test']`). Baked in so generated
-// services need no `coverage-exclude` wiring. These only take effect for files
-// absent from the report: controllers/config that integration tests *do* cover
-// stay in the report and are gated on their real coverage.
-const POSTMAN_SERVICE_EXCLUDE = ['api/controllers/**', 'config/**', 'test/**'];
-// Always-applied default excludes. Repo-provided / auto-inferred patterns are
-// applied *in addition* to these, so repos that pass nothing behave as before.
-exports.DEFAULT_COVERAGE_EXCLUDE = [
-    ...GENERIC_EXCLUDE,
-    ...POSTMAN_SERVICE_EXCLUDE,
 ];
 const GLOB_REGEX_SPECIALS = '\\^$+?.()|[]{}';
 /**
@@ -1806,7 +1788,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.inferCoverageExclude = exports.normalizeExcludeGlobs = exports.notNull = exports.parseLine = exports.getCoverageColor = exports.getContentFile = exports.getPathToFile = void 0;
+exports.notNull = exports.parseLine = exports.getCoverageColor = exports.getContentFile = exports.getPathToFile = void 0;
 const core = __importStar(__nccwpck_require__(2186));
 const fs_1 = __nccwpck_require__(7147);
 function getPathToFile(pathToFile) {
@@ -1882,63 +1864,6 @@ function notNull(value) {
     return value !== null;
 }
 exports.notNull = notNull;
-/**
- * Normalize NYC-style excludes to the glob dialect understood by globToRegExp.
- * A bare path with no wildcard (e.g. `api/controllers`, a common NYC entry) is a
- * directory exclude, so also emit `<path>/**` to match its contents.
- */
-function normalizeExcludeGlobs(patterns) {
-    const normalized = new Set();
-    for (const pattern of patterns) {
-        const trimmed = pattern.trim();
-        if (!trimmed) {
-            continue;
-        }
-        normalized.add(trimmed);
-        if (!trimmed.includes('*')) {
-            normalized.add(`${trimmed.replace(/\/+$/, '')}/**`);
-        }
-    }
-    return [...normalized];
-}
-exports.normalizeExcludeGlobs = normalizeExcludeGlobs;
-/**
- * Best-effort auto-inference of coverage excludes from a repo's *declarative*
- * config, so services need not pass `coverage-exclude` manually. Reads
- * `.nycrc`, `.nycrc.json` and `package.json#nyc.exclude` (JSON only). Config
- * expressed in JS (`.nycrc.js`, inline `new NYC({ exclude })`) or Jest's
- * `collectCoverageFrom` is intentionally not evaluated here — rely on the
- * explicit input or the built-in defaults for those.
- */
-function inferCoverageExclude(baseDir = process.env.GITHUB_WORKSPACE || '.') {
-    const readJson = (relativePath) => {
-        const fullPath = `${baseDir}/${relativePath}`;
-        if (!(0, fs_1.existsSync)(fullPath)) {
-            return null;
-        }
-        try {
-            return JSON.parse((0, fs_1.readFileSync)(fullPath, 'utf8'));
-        }
-        catch {
-            core.warning(`Could not parse ${relativePath} for coverage excludes`);
-            return null;
-        }
-    };
-    const inferred = [];
-    for (const file of ['.nycrc', '.nycrc.json']) {
-        const exclude = readJson(file)?.exclude;
-        if (Array.isArray(exclude)) {
-            inferred.push(...exclude);
-        }
-    }
-    const nyc = readJson('package.json')?.nyc;
-    const nycExclude = nyc?.exclude;
-    if (Array.isArray(nycExclude)) {
-        inferred.push(...nycExclude);
-    }
-    return normalizeExcludeGlobs(inferred);
-}
-exports.inferCoverageExclude = inferCoverageExclude;
 
 
 /***/ }),

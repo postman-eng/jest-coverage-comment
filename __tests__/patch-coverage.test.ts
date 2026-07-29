@@ -228,42 +228,24 @@ describe('getPatchCoverage', () => {
     expect(getPatchCoverage(options)).toBeNull()
   })
 
-  test('bakes Postman service-layout paths into the defaults (no input needed)', () => {
+  test('does not hardcode service-layout paths; they are gated without coverageExclude', () => {
     const options = baseOptions({
       changedFiles: {
-        all: [
-          'api/controllers/HealthController.ts',
-          'config/http.ts',
-          'test/unit/foo.ts',
-        ],
+        all: ['api/controllers/HealthController.ts', 'config/http.ts'],
         changedLines: {
           'api/controllers/HealthController.ts': [1, 2, 3],
           'config/http.ts': [4, 5],
-          'test/unit/foo.ts': [1],
         },
       },
     })
 
     const patch = getPatchCoverage(options)
-    // Photon/Sails service layout is excluded by default, so generated services
-    // need no coverage-exclude wiring at all.
-    expect(patch?.totalLines).toBe(0)
-    expect(patch?.coverage).toBe(100)
-    expect(patch?.files).toHaveLength(0)
-  })
-
-  test('a genuine new service file outside the excluded paths is still gated', () => {
-    const options = baseOptions({
-      changedFiles: {
-        all: ['api/services/PaymentService.ts'],
-        changedLines: { 'api/services/PaymentService.ts': [1, 2, 3] },
-      },
-    })
-
-    const patch = getPatchCoverage(options)
-    // Not under an excluded path => a new, untested source file is still gated.
+    // This is a generic action: it applies only the universal defaults. Any
+    // org/service layout (e.g. Photon's api/controllers, config) is supplied by
+    // the caller via coverage-exclude, so absent source is gated by default.
+    expect(patch?.totalLines).toBe(5)
     expect(patch?.coverage).toBe(0)
-    expect(patch?.files[0].instrumented).toBe(false)
+    expect(patch?.files).toHaveLength(2)
   })
 
   test('repo-provided coverageExclude skips project-excluded files with no coverage data', () => {

@@ -149,11 +149,13 @@ function loadLineHits(options: Options): LineHitsByFile | null {
 
 const DEFAULT_SOURCE_EXTENSIONS = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx']
 
-// Source-like files that are excluded from instrumentation across ecosystems:
-// test/spec files, type declarations, test/mock dirs, build/tooling config, and
-// test-runner wrapper scripts. Absent from the coverage report by design, so a
-// change to them must not be scored as uncovered source.
-const GENERIC_EXCLUDE = [
+// Universal, always-applied excludes: source-like files that no test runner
+// instruments in any ecosystem -- test/spec files, type declarations, test/mock
+// dirs, build/tooling config, and test-runner wrapper scripts. They are absent
+// from the coverage report by design, so a change to them must never be scored
+// as uncovered source. This is a non-negotiable safety net (not project
+// policy); org- or service-specific paths are supplied via `coverage-exclude`.
+export const DEFAULT_COVERAGE_EXCLUDE = [
   '**/*.test.*',
   '**/*.spec.*',
   '**/*.d.ts',
@@ -179,21 +181,6 @@ const GENERIC_EXCLUDE = [
   '**/test-*.mts',
   '**/test-*.jsx',
   '**/test-*.tsx',
-]
-
-// Postman service-layout paths (Photon / Sails) excluded from unit
-// instrumentation by the standard `@postman/generator-stack` NYC config
-// (`exclude: ['api/controllers', 'config', 'test']`). Baked in so generated
-// services need no `coverage-exclude` wiring. These only take effect for files
-// absent from the report: controllers/config that integration tests *do* cover
-// stay in the report and are gated on their real coverage.
-const POSTMAN_SERVICE_EXCLUDE = ['api/controllers/**', 'config/**', 'test/**']
-
-// Always-applied default excludes. Repo-provided / auto-inferred patterns are
-// applied *in addition* to these, so repos that pass nothing behave as before.
-export const DEFAULT_COVERAGE_EXCLUDE = [
-  ...GENERIC_EXCLUDE,
-  ...POSTMAN_SERVICE_EXCLUDE,
 ]
 
 const GLOB_REGEX_SPECIALS = '\\^$+?.()|[]{}'
