@@ -85,9 +85,8 @@ async function main(): Promise<void> {
       required: false,
     })
 
-    // Extra exclude globs on top of the always-applied built-in defaults.
-    // Org/service-specific paths are supplied by the caller (see the
-    // coverage-pr-comment-action default), not hardcoded in this generic action.
+    // Extra exclude globs, applied on top of the built-in defaults. Org/service
+    // paths come from the caller (coverage-pr-comment-action default).
     const coverageExclude = core.getMultilineInput('coverage-exclude', {
       required: false,
     })

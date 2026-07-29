@@ -612,9 +612,8 @@ async function main() {
         const patchThreshold = core.getInput('patch-coverage-threshold', {
             required: false,
         });
-        // Extra exclude globs on top of the always-applied built-in defaults.
-        // Org/service-specific paths are supplied by the caller (see the
-        // coverage-pr-comment-action default), not hardcoded in this generic action.
+        // Extra exclude globs, applied on top of the built-in defaults. Org/service
+        // paths come from the caller (coverage-pr-comment-action default).
         const coverageExclude = core.getMultilineInput('coverage-exclude', {
             required: false,
         });
@@ -1354,15 +1353,10 @@ const DEFAULT_SOURCE_EXTENSIONS = [
     '.mts',
     '.cts',
 ];
-// Universal, always-applied excludes: source-like files that no test runner
-// instruments in any ecosystem -- test/spec files, type declarations, test/mock
-// dirs, build/tooling config, and test-runner wrapper scripts. They are absent
-// from the coverage report by design, so a change to them must never be scored
-// as uncovered source. This mirrors istanbul's built-in `defaultExclude` (the
-// action reads the report, not the project's NYC config, so it re-derives the
-// classification here). Extension is matched with a trailing `*` to cover every
-// JS/TS variant. This is a non-negotiable safety net (not project policy);
-// org/service paths are supplied via `coverage-exclude`.
+// Files never instrumented in any ecosystem (mirrors istanbul's
+// `defaultExclude`). This action reads the coverage report, not the project's
+// NYC config, so it re-derives the classification here. Org/service paths are
+// supplied via `coverage-exclude`.
 exports.DEFAULT_COVERAGE_EXCLUDE = [
     '**/*.test.*',
     '**/*.spec.*',
@@ -1414,13 +1408,9 @@ function globToRegExp(glob) {
 exports.globToRegExp = globToRegExp;
 const DEFAULT_EXCLUDE_MATCHERS = exports.DEFAULT_COVERAGE_EXCLUDE.map(globToRegExp);
 /**
- * Decide whether a changed file without coverage data should still be counted
- * (as fully uncovered). A file counts only when it has a source extension and
- * matches none of the coverage-exclude globs (built-in defaults plus any
- * repo-provided patterns). This closes the gap where a brand-new, untested
- * source file is absent from the coverage report and would otherwise let the
- * gate pass at a misleading 100%, while never penalising files the project
- * legitimately excludes from instrumentation.
+ * A changed file absent from the report still counts as fully uncovered when it
+ * is source and matches no exclude glob -- so a new, untested file can't pass
+ * the gate at a misleading 100%, while excluded files are never penalised.
  */
 function isCoverableSource(file, excludeMatchers) {
     if (!DEFAULT_SOURCE_EXTENSIONS.some((ext) => file.endsWith(ext))) {
@@ -1454,8 +1444,6 @@ function getPatchCoverage(options) {
     if (!lineHitsByFile) {
         return null;
     }
-    // Built-in defaults first, then repo-provided excludes (mirroring the
-    // project's NYC `exclude` / the inverse of Jest `collectCoverageFrom`).
     const excludeMatchers = [
         ...DEFAULT_EXCLUDE_MATCHERS,
         ...(options.coverageExclude ?? []).map(globToRegExp),
@@ -1469,10 +1457,8 @@ function getPatchCoverage(options) {
         }
         const lineHits = lineHitsByFile.get(file);
         if (!lineHits) {
-            // No coverage data for this file. Skip non-source files (docs, config,
-            // fixtures) and anything the project excludes from instrumentation; treat
-            // remaining coverable source files as fully uncovered so a new, untested
-            // file cannot slip past the gate.
+            // Absent from the report: skip non-source/excluded files; count remaining
+            // source as fully uncovered so a new, untested file can't slip past.
             if (!isCoverableSource(file, excludeMatchers)) {
                 continue;
             }
@@ -1491,12 +1477,13 @@ function getPatchCoverage(options) {
         let fileCovered = 0;
         const uncoveredLines = [];
         for (const line of lines) {
-            if (!lineHits.has(line)) {
-                // Line is not executable (blank, comment, type-only), ignore it.
+            const hits = lineHits.get(line);
+            // Not an executable line (blank, comment, type-only) -> ignore.
+            if (hits === undefined) {
                 continue;
             }
             fileTotal++;
-            if ((lineHits.get(line) ?? 0) > 0) {
+            if (hits > 0) {
                 fileCovered++;
             }
             else {
@@ -1542,7 +1529,6 @@ function patchCoverageToMarkdown(patch, options) {
     if (patch.totalLines === 0) {
         return '### \u2705 Incremental line coverage\nNo changed executable lines in this PR \u2014 nothing to cover.';
     }
-    // The one number to follow: line coverage of the changed lines.
     const pct = `**${patch.coverage}%**`;
     const ratio = `**${patch.coveredLines}/${patch.totalLines}** changed lines covered`;
     const required = patch.threshold !== null ? ` (required \u2265 ${patch.threshold}%)` : '';
