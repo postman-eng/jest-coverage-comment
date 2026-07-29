@@ -228,19 +228,41 @@ describe('getPatchCoverage', () => {
     expect(getPatchCoverage(options)).toBeNull()
   })
 
-  test('without coverageExclude, a project-excluded file is still gated (backward compatible default)', () => {
+  test('bakes Postman service-layout paths into the defaults (no input needed)', () => {
     const options = baseOptions({
       changedFiles: {
-        all: ['api/controllers/HealthController.ts'],
-        changedLines: { 'api/controllers/HealthController.ts': [1, 2, 3] },
+        all: [
+          'api/controllers/HealthController.ts',
+          'config/http.ts',
+          'test/unit/foo.ts',
+        ],
+        changedLines: {
+          'api/controllers/HealthController.ts': [1, 2, 3],
+          'config/http.ts': [4, 5],
+          'test/unit/foo.ts': [1],
+        },
       },
     })
 
     const patch = getPatchCoverage(options)
-    // No repo excludes provided => defaults only => controller counts as source,
-    // preserving the pre-existing (already-onboarded repos) behavior exactly.
+    // Photon/Sails service layout is excluded by default, so generated services
+    // need no coverage-exclude wiring at all.
+    expect(patch?.totalLines).toBe(0)
+    expect(patch?.coverage).toBe(100)
+    expect(patch?.files).toHaveLength(0)
+  })
+
+  test('a genuine new service file outside the excluded paths is still gated', () => {
+    const options = baseOptions({
+      changedFiles: {
+        all: ['api/services/PaymentService.ts'],
+        changedLines: { 'api/services/PaymentService.ts': [1, 2, 3] },
+      },
+    })
+
+    const patch = getPatchCoverage(options)
+    // Not under an excluded path => a new, untested source file is still gated.
     expect(patch?.coverage).toBe(0)
-    expect(patch?.totalLines).toBe(3)
     expect(patch?.files[0].instrumented).toBe(false)
   })
 
@@ -287,9 +309,9 @@ describe('getPatchCoverage', () => {
 
 describe('globToRegExp', () => {
   test('matches ** across path segments', () => {
-    expect(globToRegExp('api/controllers/**').test('api/controllers/A.ts')).toBe(
-      true
-    )
+    expect(
+      globToRegExp('api/controllers/**').test('api/controllers/A.ts')
+    ).toBe(true)
     expect(
       globToRegExp('api/controllers/**').test('api/controllers/deep/B.ts')
     ).toBe(true)

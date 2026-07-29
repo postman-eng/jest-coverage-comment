@@ -1,9 +1,13 @@
-import { readFileSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { expect, test, describe, beforeAll, afterAll } from '@jest/globals'
 import {
   getContentFile,
   getCoverageColor,
   getPathToFile,
+  inferCoverageExclude,
+  normalizeExcludeGlobs,
   parseLine,
 } from '../src/utils'
 import { spyCore } from './setup'
@@ -131,5 +135,59 @@ describe('should check all utils functions', () => {
       expect(parsedLine1).toMatchObject(expectedResult)
       expect(parsedLine2).toMatchObject(expectedResult)
     })
+  })
+})
+
+describe('normalizeExcludeGlobs', () => {
+  test('expands bare directory paths to also match their contents', () => {
+    expect(normalizeExcludeGlobs(['api/controllers'])).toEqual([
+      'api/controllers',
+      'api/controllers/**',
+    ])
+  })
+
+  test('leaves glob patterns untouched and drops blanks', () => {
+    expect(normalizeExcludeGlobs(['**/*.d.ts', '  ', 'src/*.ts'])).toEqual([
+      '**/*.d.ts',
+      'src/*.ts',
+    ])
+  })
+})
+
+describe('inferCoverageExclude', () => {
+  let repoDir: string
+
+  afterAll(() => {
+    if (repoDir) {
+      rmSync(repoDir, { recursive: true, force: true })
+    }
+  })
+
+  test('reads NYC exclude from .nycrc.json', () => {
+    repoDir = mkdtempSync(join(tmpdir(), 'jcc-nycrc-'))
+    writeFileSync(
+      join(repoDir, '.nycrc.json'),
+      JSON.stringify({ exclude: ['api/controllers', '**/*.mock.ts'] })
+    )
+
+    expect(inferCoverageExclude(repoDir)).toEqual([
+      'api/controllers',
+      'api/controllers/**',
+      '**/*.mock.ts',
+    ])
+  })
+
+  test('reads NYC exclude from package.json and returns [] when absent', () => {
+    const pkgDir = mkdtempSync(join(tmpdir(), 'jcc-pkg-'))
+    writeFileSync(
+      join(pkgDir, 'package.json'),
+      JSON.stringify({ nyc: { exclude: ['config'] } })
+    )
+    expect(inferCoverageExclude(pkgDir)).toEqual(['config', 'config/**'])
+    rmSync(pkgDir, { recursive: true, force: true })
+
+    const emptyDir = mkdtempSync(join(tmpdir(), 'jcc-empty-'))
+    expect(inferCoverageExclude(emptyDir)).toEqual([])
+    rmSync(emptyDir, { recursive: true, force: true })
   })
 })

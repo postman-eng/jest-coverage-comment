@@ -149,18 +149,11 @@ function loadLineHits(options: Options): LineHitsByFile | null {
 
 const DEFAULT_SOURCE_EXTENSIONS = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx']
 
-// Built-in coverage-exclude globs. These encode files that are source-like by
-// extension but are excluded from instrumentation by convention, so they are
-// absent from the coverage report by design:
-//   - test/spec files and type declarations (`*.test.*`, `*.spec.*`, `*.d.ts`)
-//   - test/mock directories (`__tests__/`, `__mocks__/`)
-//   - build/tooling config (`*.config.{js,cjs,mjs,ts,cts,mts}`, `.*rc.*`)
-//   - test-runner / CI harness wrappers whose basename starts with `test-`
-// Kept as the always-applied default so repos that pass no `coverage-exclude`
-// behave exactly as before. Any repo-provided patterns are applied *in addition*
-// to these; without them, editing such a file in a PR would be scored as an
-// untested source file and wrongly force patch coverage to 0%.
-export const DEFAULT_COVERAGE_EXCLUDE = [
+// Source-like files that are excluded from instrumentation across ecosystems:
+// test/spec files, type declarations, test/mock dirs, build/tooling config, and
+// test-runner wrapper scripts. Absent from the coverage report by design, so a
+// change to them must not be scored as uncovered source.
+const GENERIC_EXCLUDE = [
   '**/*.test.*',
   '**/*.spec.*',
   '**/*.d.ts',
@@ -186,6 +179,21 @@ export const DEFAULT_COVERAGE_EXCLUDE = [
   '**/test-*.mts',
   '**/test-*.jsx',
   '**/test-*.tsx',
+]
+
+// Postman service-layout paths (Photon / Sails) excluded from unit
+// instrumentation by the standard `@postman/generator-stack` NYC config
+// (`exclude: ['api/controllers', 'config', 'test']`). Baked in so generated
+// services need no `coverage-exclude` wiring. These only take effect for files
+// absent from the report: controllers/config that integration tests *do* cover
+// stay in the report and are gated on their real coverage.
+const POSTMAN_SERVICE_EXCLUDE = ['api/controllers/**', 'config/**', 'test/**']
+
+// Always-applied default excludes. Repo-provided / auto-inferred patterns are
+// applied *in addition* to these, so repos that pass nothing behave as before.
+export const DEFAULT_COVERAGE_EXCLUDE = [
+  ...GENERIC_EXCLUDE,
+  ...POSTMAN_SERVICE_EXCLUDE,
 ]
 
 const GLOB_REGEX_SPECIALS = '\\^$+?.()|[]{}'
