@@ -85,6 +85,12 @@ async function main(): Promise<void> {
       required: false,
     })
 
+    // Extra exclude globs, applied on top of the built-in defaults. Org/service
+    // paths come from the caller (coverage-pr-comment-action default).
+    const coverageExclude = core.getMultilineInput('coverage-exclude', {
+      required: false,
+    })
+
     const serverUrl = context.serverUrl || 'https://github.com'
     core.info(`Uses Github URL: ${serverUrl}`)
 
@@ -124,6 +130,7 @@ async function main(): Promise<void> {
       coverageFinalFile,
       coverageLcovFile,
       patchThreshold,
+      coverageExclude,
     }
 
     if (eventName === 'pull_request' && payload) {

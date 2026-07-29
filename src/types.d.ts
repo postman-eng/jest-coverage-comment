@@ -30,6 +30,11 @@ export interface Options {
   coverageLcovFile?: string
   // Incremental (patch) coverage gate threshold as a percentage string, '' when unset.
   patchThreshold?: string
+  // Glob patterns for files excluded from coverage instrumentation (mirrors the
+  // project's NYC `exclude` / the inverse of Jest `collectCoverageFrom`). Applied
+  // in addition to the built-in defaults; changed files matching these are not
+  // scored as uncovered for incremental (patch) coverage.
+  coverageExclude?: string[]
 }
 
 export interface ChangedFiles {

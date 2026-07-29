@@ -147,44 +147,83 @@ function loadLineHits(options: Options): LineHitsByFile | null {
   return null
 }
 
-const DEFAULT_SOURCE_EXTENSIONS = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx']
+const DEFAULT_SOURCE_EXTENSIONS = [
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.ts',
+  '.tsx',
+  '.mts',
+  '.cts',
+]
 
-// Files that are source-like by extension but should never count as coverable.
-const NON_COVERABLE = /(\.test\.|\.spec\.|\.d\.ts$|__tests__\/|__mocks__\/)/
+// Files never instrumented in any ecosystem (mirrors istanbul's
+// `defaultExclude`). This action reads the coverage report, not the project's
+// NYC config, so it re-derives the classification here. Org/service paths are
+// supplied via `coverage-exclude`.
+export const DEFAULT_COVERAGE_EXCLUDE = [
+  '**/*.test.*',
+  '**/*.spec.*',
+  '**/*.d.ts',
+  '**/*.d.mts',
+  '**/*.d.cts',
+  '**/__tests__/**',
+  '**/__mocks__/**',
+  '**/*.config.*',
+  '**/.*rc.*',
+  '**/test-*.*',
+]
 
-// Build/tooling config that is source-like by extension but is deliberately
-// excluded from instrumentation (not part of `collectCoverageFrom`), so it is
-// absent from the coverage report by design. Matches `*.config.{js,cjs,mjs,ts}`
-// (jest.config.js, webpack.config.ts, vite.config.mjs, …) and dotfile RC
-// configs (.eslintrc.js, .prettierrc.cjs, …). Without this, editing such a file
-// in a PR would be scored as an untested source file and wrongly force patch
-// coverage to 0%.
-const CONFIG_FILE = /(^|\/)([^/]+\.config\.[cm]?[jt]s|\.[^/]+rc\.[cm]?[jt]s)$/
-
-// Test-runner / CI harness wrapper scripts (e.g. `scripts/test-unit.js`,
-// `npm/test-integration.js`, `packages/x/npm/test/test-unit.js`). These invoke
-// the test runner / wire up coverage reporters but are not themselves
-// instrumented app source, so they are absent from the coverage report by
-// design. Matches any file whose basename starts with `test-`. Without this,
-// adding such a wrapper in a PR would be scored as an untested source file and
-// wrongly force patch coverage to 0%.
-const TEST_RUNNER = /(^|\/)test-[^/]*\.[cm]?[jt]sx?$/
+const GLOB_REGEX_SPECIALS = '\\^$+?.()|[]{}'
 
 /**
- * Decide whether a changed file without coverage data should still be counted
- * (as fully uncovered). This closes the gap where a brand-new, untested source
- * file is absent from the coverage report and would otherwise be skipped,
- * letting the gate pass at a misleading 100%.
+ * Convert a minimal glob into an anchored RegExp. Supports `*` (matches within a
+ * single path segment) and `**` (matches across segments). A leading globstar
+ * segment also matches zero directories, so a `<globstar>/x` pattern matches a
+ * top-level `x`. Brace expansion is unsupported; use a trailing `*` (e.g.
+ * `*.config.*`) to match across file extensions.
  */
-function isCoverableSource(file: string): boolean {
+export function globToRegExp(glob: string): RegExp {
+  let pattern = ''
+
+  for (let i = 0; i < glob.length; i++) {
+    const char = glob[i]
+
+    if (char === '*') {
+      if (glob[i + 1] === '*') {
+        i++
+        if (glob[i + 1] === '/') {
+          i++
+          pattern += '(?:.*/)?'
+        } else {
+          pattern += '.*'
+        }
+      } else {
+        pattern += '[^/]*'
+      }
+    } else if (GLOB_REGEX_SPECIALS.includes(char)) {
+      pattern += `\\${char}`
+    } else {
+      pattern += char
+    }
+  }
+
+  return new RegExp(`^${pattern}$`)
+}
+
+const DEFAULT_EXCLUDE_MATCHERS = DEFAULT_COVERAGE_EXCLUDE.map(globToRegExp)
+
+/**
+ * A changed file absent from the report still counts as fully uncovered when it
+ * is source and matches no exclude glob -- so a new, untested file can't pass
+ * the gate at a misleading 100%, while excluded files are never penalised.
+ */
+function isCoverableSource(file: string, excludeMatchers: RegExp[]): boolean {
   if (!DEFAULT_SOURCE_EXTENSIONS.some((ext) => file.endsWith(ext))) {
     return false
   }
-  return (
-    !NON_COVERABLE.test(file) &&
-    !CONFIG_FILE.test(file) &&
-    !TEST_RUNNER.test(file)
-  )
+  return !excludeMatchers.some((matcher) => matcher.test(file))
 }
 
 /** Parse the configured threshold; returns null when unset/invalid (advisory). */
@@ -220,6 +259,11 @@ export function getPatchCoverage(options: Options): PatchCoverage | null {
     return null
   }
 
+  const excludeMatchers = [
+    ...DEFAULT_EXCLUDE_MATCHERS,
+    ...(options.coverageExclude ?? []).map(globToRegExp),
+  ]
+
   const files: PatchCoverageFile[] = []
   let totalChanged = 0
   let coveredChanged = 0
@@ -232,10 +276,9 @@ export function getPatchCoverage(options: Options): PatchCoverage | null {
     const lineHits = lineHitsByFile.get(file)
 
     if (!lineHits) {
-      // No coverage data for this file. Skip non-source files (docs, config,
-      // fixtures); treat coverable source files as fully uncovered so a new,
-      // untested file cannot slip past the gate.
-      if (!isCoverableSource(file)) {
+      // Absent from the report: skip non-source/excluded files; count remaining
+      // source as fully uncovered so a new, untested file can't slip past.
+      if (!isCoverableSource(file, excludeMatchers)) {
         continue
       }
       totalChanged += lines.length
@@ -255,12 +298,13 @@ export function getPatchCoverage(options: Options): PatchCoverage | null {
     const uncoveredLines: number[] = []
 
     for (const line of lines) {
-      if (!lineHits.has(line)) {
-        // Line is not executable (blank, comment, type-only), ignore it.
+      const hits = lineHits.get(line)
+      // Not an executable line (blank, comment, type-only) -> ignore.
+      if (hits === undefined) {
         continue
       }
       fileTotal++
-      if ((lineHits.get(line) ?? 0) > 0) {
+      if (hits > 0) {
         fileCovered++
       } else {
         uncoveredLines.push(line)
@@ -314,7 +358,6 @@ export function patchCoverageToMarkdown(
     return '### \u2705 Incremental line coverage\nNo changed executable lines in this PR \u2014 nothing to cover.'
   }
 
-  // The one number to follow: line coverage of the changed lines.
   const pct = `**${patch.coverage}%**`
   const ratio = `**${patch.coveredLines}/${patch.totalLines}** changed lines covered`
   const required =
