@@ -149,42 +149,98 @@ function loadLineHits(options: Options): LineHitsByFile | null {
 
 const DEFAULT_SOURCE_EXTENSIONS = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx']
 
-// Files that are source-like by extension but should never count as coverable.
-const NON_COVERABLE = /(\.test\.|\.spec\.|\.d\.ts$|__tests__\/|__mocks__\/)/
+// Built-in coverage-exclude globs. These encode files that are source-like by
+// extension but are excluded from instrumentation by convention, so they are
+// absent from the coverage report by design:
+//   - test/spec files and type declarations (`*.test.*`, `*.spec.*`, `*.d.ts`)
+//   - test/mock directories (`__tests__/`, `__mocks__/`)
+//   - build/tooling config (`*.config.{js,cjs,mjs,ts,cts,mts}`, `.*rc.*`)
+//   - test-runner / CI harness wrappers whose basename starts with `test-`
+// Kept as the always-applied default so repos that pass no `coverage-exclude`
+// behave exactly as before. Any repo-provided patterns are applied *in addition*
+// to these; without them, editing such a file in a PR would be scored as an
+// untested source file and wrongly force patch coverage to 0%.
+export const DEFAULT_COVERAGE_EXCLUDE = [
+  '**/*.test.*',
+  '**/*.spec.*',
+  '**/*.d.ts',
+  '**/__tests__/**',
+  '**/__mocks__/**',
+  '**/*.config.js',
+  '**/*.config.cjs',
+  '**/*.config.mjs',
+  '**/*.config.ts',
+  '**/*.config.cts',
+  '**/*.config.mts',
+  '**/.*rc.js',
+  '**/.*rc.cjs',
+  '**/.*rc.mjs',
+  '**/.*rc.ts',
+  '**/.*rc.cts',
+  '**/.*rc.mts',
+  '**/test-*.js',
+  '**/test-*.cjs',
+  '**/test-*.mjs',
+  '**/test-*.ts',
+  '**/test-*.cts',
+  '**/test-*.mts',
+  '**/test-*.jsx',
+  '**/test-*.tsx',
+]
 
-// Build/tooling config that is source-like by extension but is deliberately
-// excluded from instrumentation (not part of `collectCoverageFrom`), so it is
-// absent from the coverage report by design. Matches `*.config.{js,cjs,mjs,ts}`
-// (jest.config.js, webpack.config.ts, vite.config.mjs, …) and dotfile RC
-// configs (.eslintrc.js, .prettierrc.cjs, …). Without this, editing such a file
-// in a PR would be scored as an untested source file and wrongly force patch
-// coverage to 0%.
-const CONFIG_FILE = /(^|\/)([^/]+\.config\.[cm]?[jt]s|\.[^/]+rc\.[cm]?[jt]s)$/
+const GLOB_REGEX_SPECIALS = '\\^$+?.()|[]{}'
 
-// Test-runner / CI harness wrapper scripts (e.g. `scripts/test-unit.js`,
-// `npm/test-integration.js`, `packages/x/npm/test/test-unit.js`). These invoke
-// the test runner / wire up coverage reporters but are not themselves
-// instrumented app source, so they are absent from the coverage report by
-// design. Matches any file whose basename starts with `test-`. Without this,
-// adding such a wrapper in a PR would be scored as an untested source file and
-// wrongly force patch coverage to 0%.
-const TEST_RUNNER = /(^|\/)test-[^/]*\.[cm]?[jt]sx?$/
+/**
+ * Convert a minimal glob into an anchored RegExp. Supports `*` (matches within a
+ * single path segment) and `**` (matches across segments). A leading globstar
+ * segment also matches zero directories, so a `<globstar>/x` pattern matches a
+ * top-level `x`. Intentionally does not support brace expansion; list extensions
+ * explicitly instead.
+ */
+export function globToRegExp(glob: string): RegExp {
+  let pattern = ''
+
+  for (let i = 0; i < glob.length; i++) {
+    const char = glob[i]
+
+    if (char === '*') {
+      if (glob[i + 1] === '*') {
+        i++
+        if (glob[i + 1] === '/') {
+          i++
+          pattern += '(?:.*/)?'
+        } else {
+          pattern += '.*'
+        }
+      } else {
+        pattern += '[^/]*'
+      }
+    } else if (GLOB_REGEX_SPECIALS.includes(char)) {
+      pattern += `\\${char}`
+    } else {
+      pattern += char
+    }
+  }
+
+  return new RegExp(`^${pattern}$`)
+}
+
+const DEFAULT_EXCLUDE_MATCHERS = DEFAULT_COVERAGE_EXCLUDE.map(globToRegExp)
 
 /**
  * Decide whether a changed file without coverage data should still be counted
- * (as fully uncovered). This closes the gap where a brand-new, untested source
- * file is absent from the coverage report and would otherwise be skipped,
- * letting the gate pass at a misleading 100%.
+ * (as fully uncovered). A file counts only when it has a source extension and
+ * matches none of the coverage-exclude globs (built-in defaults plus any
+ * repo-provided patterns). This closes the gap where a brand-new, untested
+ * source file is absent from the coverage report and would otherwise let the
+ * gate pass at a misleading 100%, while never penalising files the project
+ * legitimately excludes from instrumentation.
  */
-function isCoverableSource(file: string): boolean {
+function isCoverableSource(file: string, excludeMatchers: RegExp[]): boolean {
   if (!DEFAULT_SOURCE_EXTENSIONS.some((ext) => file.endsWith(ext))) {
     return false
   }
-  return (
-    !NON_COVERABLE.test(file) &&
-    !CONFIG_FILE.test(file) &&
-    !TEST_RUNNER.test(file)
-  )
+  return !excludeMatchers.some((matcher) => matcher.test(file))
 }
 
 /** Parse the configured threshold; returns null when unset/invalid (advisory). */
@@ -220,6 +276,13 @@ export function getPatchCoverage(options: Options): PatchCoverage | null {
     return null
   }
 
+  // Built-in defaults first, then repo-provided excludes (mirroring the
+  // project's NYC `exclude` / the inverse of Jest `collectCoverageFrom`).
+  const excludeMatchers = [
+    ...DEFAULT_EXCLUDE_MATCHERS,
+    ...(options.coverageExclude ?? []).map(globToRegExp),
+  ]
+
   const files: PatchCoverageFile[] = []
   let totalChanged = 0
   let coveredChanged = 0
@@ -233,9 +296,10 @@ export function getPatchCoverage(options: Options): PatchCoverage | null {
 
     if (!lineHits) {
       // No coverage data for this file. Skip non-source files (docs, config,
-      // fixtures); treat coverable source files as fully uncovered so a new,
-      // untested file cannot slip past the gate.
-      if (!isCoverableSource(file)) {
+      // fixtures) and anything the project excludes from instrumentation; treat
+      // remaining coverable source files as fully uncovered so a new, untested
+      // file cannot slip past the gate.
+      if (!isCoverableSource(file, excludeMatchers)) {
         continue
       }
       totalChanged += lines.length

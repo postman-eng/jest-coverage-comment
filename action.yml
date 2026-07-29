@@ -124,6 +124,19 @@ inputs:
     default: ''
     required: false
 
+  coverage-exclude:
+    description: >
+      Newline-separated glob patterns for files that are excluded from coverage
+      instrumentation (mirror your NYC `exclude` / the inverse of Jest
+      `collectCoverageFrom`). Changed files matching these are treated as
+      intentionally non-instrumented for incremental (patch) coverage, so they
+      are not scored as uncovered. Applied in addition to the built-in defaults
+      (test/spec files, `*.d.ts`, `__tests__`/`__mocks__`, build config, and
+      `test-*` runner scripts), so existing repos that pass nothing are
+      unaffected.
+    default: ''
+    required: false
+
 outputs:
   coverage:
     description: 'Value indicating the coverage percentage of your report based on Jest, example 78'

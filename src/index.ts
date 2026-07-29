@@ -85,6 +85,10 @@ async function main(): Promise<void> {
       required: false,
     })
 
+    const coverageExclude = core.getMultilineInput('coverage-exclude', {
+      required: false,
+    })
+
     const serverUrl = context.serverUrl || 'https://github.com'
     core.info(`Uses Github URL: ${serverUrl}`)
 
@@ -124,6 +128,7 @@ async function main(): Promise<void> {
       coverageFinalFile,
       coverageLcovFile,
       patchThreshold,
+      coverageExclude,
     }
 
     if (eventName === 'pull_request' && payload) {

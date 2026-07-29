@@ -1,5 +1,5 @@
 import { expect, test, describe } from '@jest/globals'
-import { getPatchCoverage } from '../src/patch-coverage'
+import { getPatchCoverage, globToRegExp } from '../src/patch-coverage'
 import { parsePatchAddedLines } from '../src/changed-files'
 import { Options } from '../src/types'
 
@@ -226,5 +226,94 @@ describe('getPatchCoverage', () => {
       changedLines: { 'src/covered.js': [1] },
     }
     expect(getPatchCoverage(options)).toBeNull()
+  })
+
+  test('without coverageExclude, a project-excluded file is still gated (backward compatible default)', () => {
+    const options = baseOptions({
+      changedFiles: {
+        all: ['api/controllers/HealthController.ts'],
+        changedLines: { 'api/controllers/HealthController.ts': [1, 2, 3] },
+      },
+    })
+
+    const patch = getPatchCoverage(options)
+    // No repo excludes provided => defaults only => controller counts as source,
+    // preserving the pre-existing (already-onboarded repos) behavior exactly.
+    expect(patch?.coverage).toBe(0)
+    expect(patch?.totalLines).toBe(3)
+    expect(patch?.files[0].instrumented).toBe(false)
+  })
+
+  test('repo-provided coverageExclude skips project-excluded files with no coverage data', () => {
+    const options = baseOptions({
+      coverageExclude: ['api/controllers/**', 'config/**'],
+      changedFiles: {
+        all: ['api/controllers/HealthController.ts', 'config/http.ts'],
+        changedLines: {
+          'api/controllers/HealthController.ts': [1, 2, 3],
+          'config/http.ts': [4, 5],
+        },
+      },
+    })
+
+    const patch = getPatchCoverage(options)
+    // Both are excluded from instrumentation by the project => not gated.
+    expect(patch?.totalLines).toBe(0)
+    expect(patch?.coverage).toBe(100)
+    expect(patch?.files).toHaveLength(0)
+  })
+
+  test('repo-provided coverageExclude is additive, not a replacement of defaults', () => {
+    const options = baseOptions({
+      coverageExclude: ['api/controllers/**'],
+      changedFiles: {
+        all: ['api/controllers/HealthController.ts', 'src/new-feature.ts'],
+        changedLines: {
+          'api/controllers/HealthController.ts': [1, 2],
+          'src/new-feature.ts': [1, 2, 3],
+        },
+      },
+    })
+
+    const patch = getPatchCoverage(options)
+    // Controller excluded by the repo pattern; the genuine new source file is
+    // still gated as fully uncovered (defaults + repo excludes both apply).
+    expect(patch?.totalLines).toBe(3)
+    expect(patch?.coverage).toBe(0)
+    expect(patch?.files).toHaveLength(1)
+    expect(patch?.files[0].file).toBe('src/new-feature.ts')
+  })
+})
+
+describe('globToRegExp', () => {
+  test('matches ** across path segments', () => {
+    expect(globToRegExp('api/controllers/**').test('api/controllers/A.ts')).toBe(
+      true
+    )
+    expect(
+      globToRegExp('api/controllers/**').test('api/controllers/deep/B.ts')
+    ).toBe(true)
+    expect(globToRegExp('api/controllers/**').test('api/models/A.ts')).toBe(
+      false
+    )
+  })
+
+  test('**/ matches zero or more leading directories', () => {
+    const re = globToRegExp('**/*.config.js')
+    expect(re.test('jest.config.js')).toBe(true)
+    expect(re.test('packages/app/webpack.config.js')).toBe(true)
+    expect(re.test('src/app.js')).toBe(false)
+  })
+
+  test('* stays within a single segment', () => {
+    const re = globToRegExp('config/*.ts')
+    expect(re.test('config/http.ts')).toBe(true)
+    expect(re.test('config/env/test.ts')).toBe(false)
+  })
+
+  test('test-runner default pattern does not match unrelated source', () => {
+    const re = globToRegExp('**/test-*.js')
+    expect(re.test('npm/test-unit.js')).toBe(true)
+    expect(re.test('src/attestation.js')).toBe(false)
   })
 })
