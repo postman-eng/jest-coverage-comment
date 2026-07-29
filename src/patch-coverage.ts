@@ -147,40 +147,37 @@ function loadLineHits(options: Options): LineHitsByFile | null {
   return null
 }
 
-const DEFAULT_SOURCE_EXTENSIONS = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx']
+const DEFAULT_SOURCE_EXTENSIONS = [
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.ts',
+  '.tsx',
+  '.mts',
+  '.cts',
+]
 
 // Universal, always-applied excludes: source-like files that no test runner
 // instruments in any ecosystem -- test/spec files, type declarations, test/mock
 // dirs, build/tooling config, and test-runner wrapper scripts. They are absent
 // from the coverage report by design, so a change to them must never be scored
-// as uncovered source. This is a non-negotiable safety net (not project
-// policy); org- or service-specific paths are supplied via `coverage-exclude`.
+// as uncovered source. This mirrors istanbul's built-in `defaultExclude` (the
+// action reads the report, not the project's NYC config, so it re-derives the
+// classification here). Extension is matched with a trailing `*` to cover every
+// JS/TS variant. This is a non-negotiable safety net (not project policy);
+// org/service paths are supplied via `coverage-exclude`.
 export const DEFAULT_COVERAGE_EXCLUDE = [
   '**/*.test.*',
   '**/*.spec.*',
   '**/*.d.ts',
+  '**/*.d.mts',
+  '**/*.d.cts',
   '**/__tests__/**',
   '**/__mocks__/**',
-  '**/*.config.js',
-  '**/*.config.cjs',
-  '**/*.config.mjs',
-  '**/*.config.ts',
-  '**/*.config.cts',
-  '**/*.config.mts',
-  '**/.*rc.js',
-  '**/.*rc.cjs',
-  '**/.*rc.mjs',
-  '**/.*rc.ts',
-  '**/.*rc.cts',
-  '**/.*rc.mts',
-  '**/test-*.js',
-  '**/test-*.cjs',
-  '**/test-*.mjs',
-  '**/test-*.ts',
-  '**/test-*.cts',
-  '**/test-*.mts',
-  '**/test-*.jsx',
-  '**/test-*.tsx',
+  '**/*.config.*',
+  '**/.*rc.*',
+  '**/test-*.*',
 ]
 
 const GLOB_REGEX_SPECIALS = '\\^$+?.()|[]{}'
@@ -189,8 +186,8 @@ const GLOB_REGEX_SPECIALS = '\\^$+?.()|[]{}'
  * Convert a minimal glob into an anchored RegExp. Supports `*` (matches within a
  * single path segment) and `**` (matches across segments). A leading globstar
  * segment also matches zero directories, so a `<globstar>/x` pattern matches a
- * top-level `x`. Intentionally does not support brace expansion; list extensions
- * explicitly instead.
+ * top-level `x`. Brace expansion is unsupported; use a trailing `*` (e.g.
+ * `*.config.*`) to match across file extensions.
  */
 export function globToRegExp(glob: string): RegExp {
   let pattern = ''

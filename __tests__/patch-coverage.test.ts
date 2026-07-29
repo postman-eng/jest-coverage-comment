@@ -248,6 +248,26 @@ describe('getPatchCoverage', () => {
     expect(patch?.files).toHaveLength(2)
   })
 
+  test('gates .mts/.cts source but excludes their declaration/config variants', () => {
+    const options = baseOptions({
+      changedFiles: {
+        all: ['src/feature.mts', 'src/types.d.mts', 'app.config.cts'],
+        changedLines: {
+          'src/feature.mts': [1, 2, 3],
+          'src/types.d.mts': [1, 2],
+          'app.config.cts': [4],
+        },
+      },
+    })
+
+    const patch = getPatchCoverage(options)
+    // .mts source is now gated; .d.mts declarations and *.config.* are excluded.
+    expect(patch?.totalLines).toBe(3)
+    expect(patch?.files).toHaveLength(1)
+    expect(patch?.files[0].file).toBe('src/feature.mts')
+    expect(patch?.coverage).toBe(0)
+  })
+
   test('repo-provided coverageExclude skips project-excluded files with no coverage data', () => {
     const options = baseOptions({
       coverageExclude: ['api/controllers/**', 'config/**'],
