@@ -1470,6 +1470,7 @@ function getPatchCoverage(options) {
                 coverage: 0,
                 uncoveredLines: [...lines],
                 instrumented: false,
+                isNew: changedFiles.added?.includes(file) ?? false,
             });
             continue;
         }
@@ -1502,6 +1503,7 @@ function getPatchCoverage(options) {
             coverage: Math.round((fileCovered / fileTotal) * 10000) / 100,
             uncoveredLines,
             instrumented: true,
+            isNew: changedFiles.added?.includes(file) ?? false,
         });
     }
     // No changed executable lines => nothing to gate on; treat as fully covered.
@@ -1565,7 +1567,12 @@ function renderFileTable(patch, options) {
         let coverageCell;
         let uncovered;
         if (!f.instrumented) {
-            coverageCell = `\u26a0\ufe0f new file (${ratio})`;
+            // Absent from the report: "new file" only when genuinely git-added;
+            // otherwise it's a modified file with no line-level coverage data
+            // (often type-only or barrel re-export files with nothing to instrument).
+            coverageCell = f.isNew
+                ? `\u26a0\ufe0f new file (${ratio})`
+                : `\u26a0\ufe0f no coverage data (${ratio})`;
             uncovered = '_no test coverage_';
         }
         else if (f.uncoveredLines.length) {

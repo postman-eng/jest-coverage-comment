@@ -1,5 +1,9 @@
 import { expect, test, describe } from '@jest/globals'
-import { getPatchCoverage, globToRegExp } from '../src/patch-coverage'
+import {
+  getPatchCoverage,
+  globToRegExp,
+  patchCoverageToMarkdown,
+} from '../src/patch-coverage'
 import { parsePatchAddedLines } from '../src/changed-files'
 import { Options } from '../src/types'
 
@@ -306,6 +310,80 @@ describe('getPatchCoverage', () => {
     expect(patch?.coverage).toBe(0)
     expect(patch?.files).toHaveLength(1)
     expect(patch?.files[0].file).toBe('src/new-feature.ts')
+  })
+})
+
+describe('getPatchCoverage isNew flag', () => {
+  test('marks a git-added uninstrumented file as new', () => {
+    const patch = getPatchCoverage(
+      baseOptions({
+        changedFiles: {
+          all: ['src/new-feature.ts'],
+          added: ['src/new-feature.ts'],
+          changedLines: { 'src/new-feature.ts': [1, 2, 3] },
+        },
+      })
+    )
+    expect(patch?.files[0].instrumented).toBe(false)
+    expect(patch?.files[0].isNew).toBe(true)
+  })
+
+  test('does not mark a modified uninstrumented file as new', () => {
+    const patch = getPatchCoverage(
+      baseOptions({
+        changedFiles: {
+          all: ['src/types.ts'],
+          modified: ['src/types.ts'],
+          changedLines: { 'src/types.ts': [1, 2, 3] },
+        },
+      })
+    )
+    expect(patch?.files[0].instrumented).toBe(false)
+    expect(patch?.files[0].isNew).toBe(false)
+  })
+})
+
+describe('patchCoverageToMarkdown file table labels', () => {
+  test('labels a truly-added uninstrumented file as "new file"', () => {
+    const options = baseOptions({
+      patchThreshold: '80',
+      changedFiles: {
+        all: ['src/new-feature.ts'],
+        added: ['src/new-feature.ts'],
+        changedLines: { 'src/new-feature.ts': [1, 2, 3] },
+      },
+    })
+
+    const patch = getPatchCoverage(options)
+    expect(patch).not.toBeNull()
+    const md = patchCoverageToMarkdown(
+      patch as NonNullable<typeof patch>,
+      options
+    )
+    expect(md).toContain('\u26a0\ufe0f new file (0/3)')
+    expect(md).not.toContain('no coverage data')
+    expect(md).toContain('_no test coverage_')
+  })
+
+  test('labels a modified uninstrumented file as "no coverage data"', () => {
+    const options = baseOptions({
+      patchThreshold: '80',
+      changedFiles: {
+        all: ['src/types.ts'],
+        modified: ['src/types.ts'],
+        changedLines: { 'src/types.ts': [1, 2, 3] },
+      },
+    })
+
+    const patch = getPatchCoverage(options)
+    expect(patch).not.toBeNull()
+    const md = patchCoverageToMarkdown(
+      patch as NonNullable<typeof patch>,
+      options
+    )
+    expect(md).toContain('\u26a0\ufe0f no coverage data (0/3)')
+    expect(md).not.toContain('new file')
+    expect(md).toContain('_no test coverage_')
   })
 })
 
