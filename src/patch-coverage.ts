@@ -7,6 +7,7 @@ import {
   CoverageColor,
 } from './types.d'
 import { getContentFile, getCoverageColor, getPathToFile } from './utils'
+import { isNonInstrumentableSource } from './non-instrumentable'
 
 interface IstanbulStatement {
   start: { line: number; column: number }
@@ -240,7 +241,9 @@ function parseThreshold(raw?: string): number | null {
  * lines that are covered by tests. Returns null when the required data is
  * unavailable, so callers can keep the check advisory.
  */
-export function getPatchCoverage(options: Options): PatchCoverage | null {
+export async function getPatchCoverage(
+  options: Options
+): Promise<PatchCoverage | null> {
   const { changedFiles } = options
 
   if (!options.coverageFinalFile && !options.coverageLcovFile) {
@@ -279,6 +282,13 @@ export function getPatchCoverage(options: Options): PatchCoverage | null {
       // Absent from the report: skip non-source/excluded files; count remaining
       // source as fully uncovered so a new, untested file can't slip past.
       if (!isCoverableSource(file, excludeMatchers)) {
+        continue
+      }
+      // A coverable source file can be absent because it genuinely has no test
+      // (must be flagged) or because it emits no runtime JS at all -- a type-only
+      // or pure re-export barrel file. Detect and skip the latter so they don't
+      // need hand-tuned excludes; fail-safe keeps ambiguous files flagged.
+      if (await isNonInstrumentableSource(options, file)) {
         continue
       }
       totalChanged += lines.length

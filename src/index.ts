@@ -188,7 +188,7 @@ async function main(): Promise<void> {
     // --- Incremental (patch) coverage: the blocking metric, shown at the top ---
     let incrementalMd = ''
     if (options.coverageFinalFile || options.coverageLcovFile) {
-      const patch = getPatchCoverage(options)
+      const patch = await getPatchCoverage(options)
 
       if (patch) {
         const status =
