@@ -69,6 +69,10 @@ export interface PatchCoverageFile {
   uncoveredLines: number[]
   // False when the file has no coverage data (e.g. a new, untested source file).
   instrumented: boolean
+  // True when the file was git-added in this PR (per changedFiles.added). Only
+  // meaningful for uninstrumented files, to distinguish a genuinely new file
+  // from a modified one that simply has no line-level coverage data.
+  isNew: boolean
 }
 
 export interface LineSummary {
