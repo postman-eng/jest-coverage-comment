@@ -188,6 +188,32 @@ describe('getPatchCoverage', () => {
     expect(patch?.files).toHaveLength(0)
   })
 
+  test('ignores changed files under test/, tests/ and mocks/ directories', async () => {
+    const options = baseOptions({
+      changedFiles: {
+        all: [
+          'tests/mocks/SyncService/SyncService.ts',
+          'test/helpers/setup.ts',
+          'src/mocks/handlers.ts',
+          'src/service.ts',
+        ],
+        changedLines: {
+          'tests/mocks/SyncService/SyncService.ts': [1, 2, 3],
+          'test/helpers/setup.ts': [1, 2],
+          'src/mocks/handlers.ts': [1],
+          'src/service.ts': [1, 2, 3],
+        },
+      },
+    })
+
+    const patch = await getPatchCoverage(options)
+    // Test-support files are excluded; only the real source file is gated.
+    expect(patch?.files).toHaveLength(1)
+    expect(patch?.files[0].file).toBe('src/service.ts')
+    expect(patch?.totalLines).toBe(3)
+    expect(patch?.coverage).toBe(0)
+  })
+
   test('still counts a genuine new source file whose name merely contains "test"', async () => {
     const options = baseOptions({
       changedFiles: {
@@ -556,5 +582,16 @@ describe('globToRegExp', () => {
     const re = globToRegExp('**/test-*.js')
     expect(re.test('npm/test-unit.js')).toBe(true)
     expect(re.test('src/attestation.js')).toBe(false)
+  })
+
+  test('test/tests/mocks directory patterns match at top level and nested', () => {
+    expect(
+      globToRegExp('**/tests/**').test('tests/mocks/SyncService/SyncService.ts')
+    ).toBe(true)
+    expect(globToRegExp('**/test/**').test('src/test/setup.ts')).toBe(true)
+    expect(globToRegExp('**/mocks/**').test('src/mocks/handlers.ts')).toBe(true)
+    expect(globToRegExp('**/tests/**').test('src/attestation/index.ts')).toBe(
+      false
+    )
   })
 })
