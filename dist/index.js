@@ -68,19 +68,40 @@ async function getChangedFiles(options) {
         core.info(`Head commit: ${head}`);
         // Resolve the set of changed files (with per-file patch) for this event.
         //
-        // pull_request: use the PR's own file list. octokit.paginate walks every page,
-        //   so there is no 300-file cap, and it returns the same three-dot diff GitHub
-        //   shows under "Files changed". (The compare endpoint only paginates its
-        //   `commits` array, not `files`, so paginating it never returned >300 files
-        //   and could duplicate the truncated list across pages.)
-        // push: diff the pushed range before...after via the compare endpoint. Compare
-        //   caps `files` at 300, but push diffs are typically small.
+        // pull_request / push-on-a-PR-branch: use the PR's own file list. octokit.paginate
+        //   walks every page, so there is no 300-file cap, and it returns the same
+        //   three-dot diff GitHub shows under "Files changed". (The compare endpoint only
+        //   paginates its `commits` array, not `files`, so paginating it never returned
+        //   >300 files and could duplicate the truncated list across pages.)
+        // push without a PR: diff the pushed range before...after via the compare endpoint.
+        //   Compare caps `files` at 300, but such push diffs are typically small.
         // new branch / first commit (all-zero base): no range to diff, fall back to the
         //   tip commit.
         const EMPTY_SHA = '0000000000000000000000000000000000000000';
-        const prNumber = payload.pull_request?.number;
+        let prNumber = payload.pull_request?.number;
+        // A push event carries no PR association, so before...after spans only the
+        // pushed commits — on a PR branch that is just the latest push, not the full
+        // PR diff (which breaks incremental coverage for stacked commits). Resolve the
+        // PR from its head branch and reuse the PR file list below. Branch is the
+        // reliable key here: a commit can belong to multiple PRs, so commit-attached
+        // PR info is ambiguous.
+        if (eventName === 'push' && !prNumber) {
+            const branch = (github_1.context.ref || '').replace(/^refs\/heads\//, '');
+            if (branch) {
+                const { data: prs } = await octokit.rest.pulls.list({
+                    owner,
+                    repo,
+                    state: 'open',
+                    head: `${owner}:${branch}`,
+                    per_page: 1,
+                });
+                if (prs.length) {
+                    prNumber = prs[0].number;
+                }
+            }
+        }
         let files = [];
-        if (eventName === 'pull_request' && prNumber) {
+        if (prNumber) {
             files = await octokit.paginate(octokit.rest.pulls.listFiles, {
                 owner,
                 repo,
