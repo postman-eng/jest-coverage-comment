@@ -44,8 +44,18 @@ export async function createComment(
       core.warning(warningsArr.join('\n'))
     }
 
-    if (eventName === 'push') {
-      core.info('Create commit comment')
+    const isPullRequestEvent =
+      eventName === 'pull_request' || eventName === 'pull_request_target'
+
+    // A push on a PR branch resolves to that PR (options.prNumber). Prefer a
+    // PR-level (issue) comment there too, so push-triggered workflows get a
+    // single comment updated in place rather than a per-commit comment.
+    const prNumber = issue_number || options.prNumber
+
+    if (prNumber && (isPullRequestEvent || eventName === 'push')) {
+      await upsertIssueComment(octokit, options, prNumber, body)
+    } else if (eventName === 'push') {
+      core.info('No open PR for branch, creating commit comment')
 
       await octokit.rest.repos.createCommitComment({
         repo,
@@ -53,61 +63,70 @@ export async function createComment(
         commit_sha: options.commit,
         body,
       })
-    } else if (
-      eventName === 'pull_request' ||
-      eventName === 'pull_request_target'
-    ) {
-      if (options.createNewComment) {
-        core.info('Creating a new comment')
-
-        await octokit.rest.issues.createComment({
-          repo,
-          owner,
-          issue_number,
-          body,
-        })
-      } else {
-        // Now decide if we should issue a new comment or edit an old one
-        const { data: comments } = await octokit.rest.issues.listComments({
-          repo,
-          owner,
-          issue_number,
-        })
-
-        const comment = comments.find(
-          (c) =>
-            c.user?.login === 'github-actions[bot]' &&
-            c.body?.startsWith(options.watermark)
-        )
-
-        if (comment) {
-          core.info('Found previous comment, updating')
-          await octokit.rest.issues.updateComment({
-            repo,
-            owner,
-            comment_id: comment.id,
-            body,
-          })
-        } else {
-          core.info('No previous comment found, creating a new one')
-          await octokit.rest.issues.createComment({
-            repo,
-            owner,
-            issue_number,
-            body,
-          })
-        }
-      }
-    } else {
-      if (!options.hideComment) {
-        core.warning(
-          `This action supports comments only on 'pull_request', 'pull_request_target' and 'push' events. '${eventName}' events are not supported.\nYou can use the output of the action.`
-        )
-      }
+    } else if (!isPullRequestEvent && !options.hideComment) {
+      core.warning(
+        `This action supports comments only on 'pull_request', 'pull_request_target' and 'push' events. '${eventName}' events are not supported.\nYou can use the output of the action.`
+      )
     }
   } catch (error) {
     if (error instanceof Error) {
       core.error(error.message)
     }
+  }
+}
+
+/**
+ * Post or update a single PR-level (issue) comment. Existing comments are matched
+ * by watermark, which encodes the job name and unique id, so distinct coverage
+ * types (e.g. unit vs integration) each maintain their own comment in place.
+ */
+async function upsertIssueComment(
+  octokit: ReturnType<typeof getOctokit>,
+  options: Options,
+  issue_number: number,
+  body: string
+): Promise<void> {
+  const { repo, owner } = context.repo
+
+  if (options.createNewComment) {
+    core.info('Creating a new comment')
+
+    await octokit.rest.issues.createComment({
+      repo,
+      owner,
+      issue_number,
+      body,
+    })
+    return
+  }
+
+  const { data: comments } = await octokit.rest.issues.listComments({
+    repo,
+    owner,
+    issue_number,
+  })
+
+  const comment = comments.find(
+    (c) =>
+      c.user?.login === 'github-actions[bot]' &&
+      c.body?.startsWith(options.watermark)
+  )
+
+  if (comment) {
+    core.info('Found previous comment, updating')
+    await octokit.rest.issues.updateComment({
+      repo,
+      owner,
+      comment_id: comment.id,
+      body,
+    })
+  } else {
+    core.info('No previous comment found, creating a new one')
+    await octokit.rest.issues.createComment({
+      repo,
+      owner,
+      issue_number,
+      body,
+    })
   }
 }

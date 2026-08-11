@@ -56,29 +56,9 @@ export async function getChangedFiles(
     // new branch / first commit (all-zero base): no range to diff, fall back to the
     //   tip commit.
     const EMPTY_SHA = '0000000000000000000000000000000000000000'
-    let prNumber = payload.pull_request?.number
-
-    // A push event carries no PR association, so before...after spans only the
-    // pushed commits — on a PR branch that is just the latest push, not the full
-    // PR diff (which breaks incremental coverage for stacked commits). Resolve the
-    // PR from its head branch and reuse the PR file list below. Branch is the
-    // reliable key here: a commit can belong to multiple PRs, so commit-attached
-    // PR info is ambiguous.
-    if (eventName === 'push' && !prNumber) {
-      const branch = (context.ref || '').replace(/^refs\/heads\//, '')
-      if (branch) {
-        const { data: prs } = await octokit.rest.pulls.list({
-          owner,
-          repo,
-          state: 'open',
-          head: `${owner}:${branch}`,
-          per_page: 1,
-        })
-        if (prs.length) {
-          prNumber = prs[0].number
-        }
-      }
-    }
+    // Resolved once in main() and shared with the comment-posting code so the
+    // open-PR lookup for push events happens a single time per run.
+    const prNumber = options.prNumber ?? (await getPrNumber(options))
 
     let files: { filename: string; status?: string; patch?: string }[] = []
 
@@ -161,6 +141,43 @@ export async function getChangedFiles(
     addedOrModified,
     changedLines,
   }
+}
+
+/**
+ * Resolve the PR number for the current run. On pull_request events it comes
+ * straight from the payload. A push event carries no PR association, so we look
+ * up the OPEN PR whose head is the pushed branch. Branch is the reliable key: a
+ * commit can belong to multiple PRs, so commit-attached PR info is ambiguous.
+ * Returns undefined for a push with no associated open PR.
+ */
+export async function getPrNumber(
+  options: Options
+): Promise<number | undefined> {
+  const { eventName, payload } = context
+  const { repo, owner } = context.repo
+
+  if (payload.pull_request?.number) {
+    return payload.pull_request.number
+  }
+
+  if (eventName === 'push') {
+    const branch = (context.ref || '').replace(/^refs\/heads\//, '')
+    if (branch) {
+      const octokit = getOctokit(options.token)
+      const { data: prs } = await octokit.rest.pulls.list({
+        owner,
+        repo,
+        state: 'open',
+        head: `${owner}:${branch}`,
+        per_page: 1,
+      })
+      if (prs.length) {
+        return prs[0].number
+      }
+    }
+  }
+
+  return undefined
 }
 
 /**

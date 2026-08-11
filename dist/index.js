@@ -30,7 +30,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.parsePatchAddedLines = exports.getChangedFiles = void 0;
+exports.parsePatchAddedLines = exports.getPrNumber = exports.getChangedFiles = void 0;
 const core = __importStar(__nccwpck_require__(2186));
 const github_1 = __nccwpck_require__(5438);
 /** Generate object of all files that changed based on commit through GitHub API. */
@@ -78,28 +78,9 @@ async function getChangedFiles(options) {
         // new branch / first commit (all-zero base): no range to diff, fall back to the
         //   tip commit.
         const EMPTY_SHA = '0000000000000000000000000000000000000000';
-        let prNumber = payload.pull_request?.number;
-        // A push event carries no PR association, so before...after spans only the
-        // pushed commits — on a PR branch that is just the latest push, not the full
-        // PR diff (which breaks incremental coverage for stacked commits). Resolve the
-        // PR from its head branch and reuse the PR file list below. Branch is the
-        // reliable key here: a commit can belong to multiple PRs, so commit-attached
-        // PR info is ambiguous.
-        if (eventName === 'push' && !prNumber) {
-            const branch = (github_1.context.ref || '').replace(/^refs\/heads\//, '');
-            if (branch) {
-                const { data: prs } = await octokit.rest.pulls.list({
-                    owner,
-                    repo,
-                    state: 'open',
-                    head: `${owner}:${branch}`,
-                    per_page: 1,
-                });
-                if (prs.length) {
-                    prNumber = prs[0].number;
-                }
-            }
-        }
+        // Resolved once in main() and shared with the comment-posting code so the
+        // open-PR lookup for push events happens a single time per run.
+        const prNumber = options.prNumber ?? (await getPrNumber(options));
         let files = [];
         if (prNumber) {
             files = await octokit.paginate(octokit.rest.pulls.listFiles, {
@@ -173,6 +154,38 @@ async function getChangedFiles(options) {
     };
 }
 exports.getChangedFiles = getChangedFiles;
+/**
+ * Resolve the PR number for the current run. On pull_request events it comes
+ * straight from the payload. A push event carries no PR association, so we look
+ * up the OPEN PR whose head is the pushed branch. Branch is the reliable key: a
+ * commit can belong to multiple PRs, so commit-attached PR info is ambiguous.
+ * Returns undefined for a push with no associated open PR.
+ */
+async function getPrNumber(options) {
+    const { eventName, payload } = github_1.context;
+    const { repo, owner } = github_1.context.repo;
+    if (payload.pull_request?.number) {
+        return payload.pull_request.number;
+    }
+    if (eventName === 'push') {
+        const branch = (github_1.context.ref || '').replace(/^refs\/heads\//, '');
+        if (branch) {
+            const octokit = (0, github_1.getOctokit)(options.token);
+            const { data: prs } = await octokit.rest.pulls.list({
+                owner,
+                repo,
+                state: 'open',
+                head: `${owner}:${branch}`,
+                per_page: 1,
+            });
+            if (prs.length) {
+                return prs[0].number;
+            }
+        }
+    }
+    return undefined;
+}
+exports.getPrNumber = getPrNumber;
 /**
  * Parse a unified-diff patch string and return the head-side (new file) line
  * numbers that were added or modified. Only `+` lines are considered "changed".
@@ -466,8 +479,16 @@ async function createComment(options, body) {
             }
             core.warning(warningsArr.join('\n'));
         }
-        if (eventName === 'push') {
-            core.info('Create commit comment');
+        const isPullRequestEvent = eventName === 'pull_request' || eventName === 'pull_request_target';
+        // A push on a PR branch resolves to that PR (options.prNumber). Prefer a
+        // PR-level (issue) comment there too, so push-triggered workflows get a
+        // single comment updated in place rather than a per-commit comment.
+        const prNumber = issue_number || options.prNumber;
+        if (prNumber && (isPullRequestEvent || eventName === 'push')) {
+            await upsertIssueComment(octokit, options, prNumber, body);
+        }
+        else if (eventName === 'push') {
+            core.info('No open PR for branch, creating commit comment');
             await octokit.rest.repos.createCommitComment({
                 repo,
                 owner,
@@ -475,50 +496,8 @@ async function createComment(options, body) {
                 body,
             });
         }
-        else if (eventName === 'pull_request' ||
-            eventName === 'pull_request_target') {
-            if (options.createNewComment) {
-                core.info('Creating a new comment');
-                await octokit.rest.issues.createComment({
-                    repo,
-                    owner,
-                    issue_number,
-                    body,
-                });
-            }
-            else {
-                // Now decide if we should issue a new comment or edit an old one
-                const { data: comments } = await octokit.rest.issues.listComments({
-                    repo,
-                    owner,
-                    issue_number,
-                });
-                const comment = comments.find((c) => c.user?.login === 'github-actions[bot]' &&
-                    c.body?.startsWith(options.watermark));
-                if (comment) {
-                    core.info('Found previous comment, updating');
-                    await octokit.rest.issues.updateComment({
-                        repo,
-                        owner,
-                        comment_id: comment.id,
-                        body,
-                    });
-                }
-                else {
-                    core.info('No previous comment found, creating a new one');
-                    await octokit.rest.issues.createComment({
-                        repo,
-                        owner,
-                        issue_number,
-                        body,
-                    });
-                }
-            }
-        }
-        else {
-            if (!options.hideComment) {
-                core.warning(`This action supports comments only on 'pull_request', 'pull_request_target' and 'push' events. '${eventName}' events are not supported.\nYou can use the output of the action.`);
-            }
+        else if (!isPullRequestEvent && !options.hideComment) {
+            core.warning(`This action supports comments only on 'pull_request', 'pull_request_target' and 'push' events. '${eventName}' events are not supported.\nYou can use the output of the action.`);
         }
     }
     catch (error) {
@@ -528,6 +507,49 @@ async function createComment(options, body) {
     }
 }
 exports.createComment = createComment;
+/**
+ * Post or update a single PR-level (issue) comment. Existing comments are matched
+ * by watermark, which encodes the job name and unique id, so distinct coverage
+ * types (e.g. unit vs integration) each maintain their own comment in place.
+ */
+async function upsertIssueComment(octokit, options, issue_number, body) {
+    const { repo, owner } = github_1.context.repo;
+    if (options.createNewComment) {
+        core.info('Creating a new comment');
+        await octokit.rest.issues.createComment({
+            repo,
+            owner,
+            issue_number,
+            body,
+        });
+        return;
+    }
+    const { data: comments } = await octokit.rest.issues.listComments({
+        repo,
+        owner,
+        issue_number,
+    });
+    const comment = comments.find((c) => c.user?.login === 'github-actions[bot]' &&
+        c.body?.startsWith(options.watermark));
+    if (comment) {
+        core.info('Found previous comment, updating');
+        await octokit.rest.issues.updateComment({
+            repo,
+            owner,
+            comment_id: comment.id,
+            body,
+        });
+    }
+    else {
+        core.info('No previous comment found, creating a new one');
+        await octokit.rest.issues.createComment({
+            repo,
+            owner,
+            issue_number,
+            body,
+        });
+    }
+}
 
 
 /***/ }),
@@ -686,6 +708,7 @@ async function main() {
             options.commit = payload.after;
             options.head = github_1.context.ref;
         }
+        options.prNumber = await (0, changed_files_1.getPrNumber)(options);
         if (options.reportOnlyChangedFiles ||
             options.coverageFinalFile ||
             options.coverageLcovFile) {

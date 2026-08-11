@@ -5,7 +5,7 @@ import { createComment } from './create-comment'
 import { getJunitReport } from './junit'
 import { getCoverageReport } from './coverage'
 import { getSummaryReport } from './summary'
-import { getChangedFiles } from './changed-files'
+import { getChangedFiles, getPrNumber } from './changed-files'
 import { getMultipleReport } from './multi-files'
 import { getMultipleJunitReport } from './multi-junit-files'
 import { getPatchCoverage, patchCoverageToMarkdown } from './patch-coverage'
@@ -141,6 +141,8 @@ async function main(): Promise<void> {
       options.commit = payload.after
       options.head = context.ref
     }
+
+    options.prNumber = await getPrNumber(options)
 
     if (
       options.reportOnlyChangedFiles ||

@@ -11,6 +11,10 @@ export interface Options {
   commit: string
   head?: string
   base?: string
+  // PR number resolved for this run: from the PR payload on pull_request events, or
+  // from an open PR matching the pushed branch on push events. Undefined when a push
+  // has no associated open PR.
+  prNumber?: number
   title?: string
   junitFile?: string
   junitTitle?: string
