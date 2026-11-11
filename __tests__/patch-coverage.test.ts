@@ -6,7 +6,7 @@ import {
 } from '../src/patch-coverage'
 import { parsePatchAddedLines } from '../src/changed-files'
 import { isNonInstrumentableSource } from '../src/non-instrumentable'
-import { Options } from '../src/types'
+import { Options, PatchCoverage } from '../src/types'
 
 // Detection fetches source over the network; mock it so patch-coverage tests
 // stay offline. Default is the fail-safe (false => keep flagging); individual
@@ -429,6 +429,55 @@ describe('patchCoverageToMarkdown file table labels', () => {
     expect(md).toContain('\u26a0\ufe0f no coverage data (0/3)')
     expect(md).not.toContain('new file')
     expect(md).toContain('_no test coverage_')
+  })
+})
+
+describe('patchCoverageToMarkdown file table collapsing', () => {
+  function blockedPatch(fileCount: number): PatchCoverage {
+    const files = Array.from({ length: fileCount }, (_, i) => ({
+      file: `src/file-${i}.ts`,
+      coveredLines: 0,
+      totalLines: 2,
+      coverage: 0,
+      uncoveredLines: [1, 2],
+      instrumented: true,
+      isNew: false,
+    }))
+    return {
+      coverage: 0,
+      color: 'red',
+      coveredLines: 0,
+      totalLines: fileCount * 2,
+      files,
+      threshold: 80,
+      meetsThreshold: false,
+    }
+  }
+
+  test('shows the table expanded when blocked with up to 20 files', () => {
+    const md = patchCoverageToMarkdown(blockedPatch(20), baseOptions())
+    expect(md).not.toContain('<details>')
+    expect(md).toContain('| Changed file |')
+  })
+
+  test('collapses the table when blocked with more than 20 files', () => {
+    const md = patchCoverageToMarkdown(blockedPatch(21), baseOptions())
+    // Headline stays visible above the collapsed table.
+    expect(md.indexOf('Incremental line coverage')).toBeLessThan(
+      md.indexOf('<details>')
+    )
+    expect(md).toContain(
+      '<details><summary>Coverage of changed files (21 files)</summary>'
+    )
+    expect(md).toContain('| Changed file |')
+  })
+
+  test('collapses the table when passing regardless of file count', () => {
+    const patch = { ...blockedPatch(1), meetsThreshold: true }
+    const md = patchCoverageToMarkdown(patch, baseOptions())
+    expect(md).toContain(
+      '<details><summary>Coverage of changed files (1 file)</summary>'
+    )
   })
 })
 
