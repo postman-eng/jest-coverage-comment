@@ -362,6 +362,8 @@ export async function getPatchCoverage(
 
 // Cap how many uncovered lines we render per file to keep the comment readable.
 const MAX_UNCOVERED_LINKS = 25
+// Beyond this many changed files the table is collapsed even when blocked.
+const MAX_EXPANDED_FILES = 20
 
 /** Render the patch coverage section as markdown for the PR comment. */
 export function patchCoverageToMarkdown(
@@ -397,10 +399,17 @@ export function patchCoverageToMarkdown(
   if (patch.files.length) {
     const table = renderFileTable(patch, options)
     // Show the actionable table up-front when blocked; collapse it otherwise.
+    // Large tables are always collapsed so the headline stays readable.
+    const count = patch.files.length
+    const expanded =
+      patch.meetsThreshold === false && count <= MAX_EXPANDED_FILES
+    const summary = `Coverage of changed files (${count} file${
+      count === 1 ? '' : 's'
+    })`
     sections.push(
-      patch.meetsThreshold === false
+      expanded
         ? table
-        : `<details><summary>Coverage of changed files</summary>\n\n${table}\n\n</details>`
+        : `<details><summary>${summary}</summary>\n\n${table}\n\n</details>`
     )
   }
 
