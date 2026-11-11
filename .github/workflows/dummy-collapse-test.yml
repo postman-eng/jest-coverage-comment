@@ -1,0 +1,27 @@
+# TEMPORARY: manual test for PR #9 (collapse large incremental table). Do not merge.
+name: dummy-collapse-test
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Synthesize coverage (lines 1-2 covered, 3-6 uncovered)
+        run: |
+          mkdir -p .coverage
+          : > .coverage/lcov.info
+          for f in dummy/src/*.js; do
+            printf 'SF:%s\nDA:1,1\nDA:2,1\nDA:3,0\nDA:4,0\nDA:6,0\nend_of_record\n' "$f" >> .coverage/lcov.info
+          done
+          echo '{"total":{"lines":{"total":10,"covered":5,"skipped":0,"pct":50},"statements":{"total":10,"covered":5,"skipped":0,"pct":50},"functions":{"total":2,"covered":1,"skipped":0,"pct":50},"branches":{"total":2,"covered":1,"skipped":0,"pct":50}}}' > .coverage/coverage-summary.json
+      - uses: ./
+        with:
+          title: dummy unit test code coverage
+          coverage-summary-path: .coverage/coverage-summary.json
+          coverage-lcov-path: .coverage/lcov.info
+          unique-id-for-comment: dummy-collapse-test
+          report-only-changed-files: true
+          patch-coverage-threshold: '80'
